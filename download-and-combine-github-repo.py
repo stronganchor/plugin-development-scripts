@@ -2,7 +2,6 @@ import os
 import requests
 import zipfile
 import io
-import tempfile
 
 def fetch_zip(url, max_retries=3, timeout=30):
     """
@@ -20,34 +19,29 @@ def fetch_zip(url, max_retries=3, timeout=30):
                 content_type = r.headers.get('content-type', '')
                 print(f"[DEBUG] Content-Type: {content_type}")
 
-                # Check if the response *looks* like a zip
-                # Basic check: "zip" in the content-type OR the first few bytes match PK header
+                # Basic check if it's likely a zip
                 if 'zip' in content_type.lower() or r.content.startswith(b'PK\x03\x04'):
                     return r.content
                 else:
                     print("[DEBUG] Response not recognized as a valid zip file. Retrying...\n")
             else:
-                print("[DEBUG] Non-200 status code. Retrying...\n")
+                print(f"[DEBUG] Non-200 status code ({r.status_code}). Retrying...\n")
 
         except Exception as e:
             print(f"[DEBUG] Attempt {attempt+1} got exception: {e}. Retrying...\n")
 
-    # If we exit the loop, all attempts failed
-    return None
+    return None  # All attempts failed
 
-import os
-import io
-import zipfile
 
-def download_github_repo(repo_url: str, temp_dir: str, max_retries=3) -> str:
+def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> str:
     """
-    Downloads the GitHub repo zip from either 'main' or 'master' branch.
-    Extracts it into temp_dir and returns the extracted repo path.
+    Downloads the GitHub repo zip (from 'main' or 'master') into extraction_dir and returns the path.
+    Leaves the extracted files in place for inspection.
     """
     if not repo_url.endswith('/'):
         repo_url += '/'
 
-    # You can expand this if your repo uses a different default branch
+    # Try 'main' first, then 'master'
     branches_to_try = ["main", "master"]
     zip_content = None
 
@@ -56,32 +50,37 @@ def download_github_repo(repo_url: str, temp_dir: str, max_retries=3) -> str:
         print(f"[DEBUG] Trying branch '{branch}': {zip_url}")
         zip_content = fetch_zip(zip_url, max_retries=max_retries)
         if zip_content:
-            # If we got valid zip bytes, stop searching
+            # If we got valid zip bytes, stop looking
             break
 
     if not zip_content:
         raise Exception(f"[ERROR] Failed to download repository from {repo_url} "
                         f"(tried branches {branches_to_try}).")
 
-    # Extract the zip into the temp_dir
+    # Ensure the extraction directory exists
+    if not os.path.exists(extraction_dir):
+        os.makedirs(extraction_dir)
+
+    # Extract the zip to extraction_dir
     with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
         if not z.namelist():
             raise Exception("[ERROR] Zip archive is empty or invalid.")
 
         print("[DEBUG] Zip file contents:", z.namelist())
-        z.extractall(temp_dir)
+        z.extractall(extraction_dir)
 
-        # Typically the first top-level folder is something like 'repo-main/'
+        # Typically the first folder is something like 'repo-main/' or 'repo-master/'
         extracted_name = z.namelist()[0].split('/')[0]
-        repo_path = os.path.join(temp_dir, extracted_name)
+        repo_path = os.path.join(extraction_dir, extracted_name)
 
     print(f"[DEBUG] Repository extracted to: {repo_path}")
     return repo_path
 
+
 def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int):
     """
-    Walks through repo_path, reads text files, and writes them to split .txt files in output_dir.
-    Skips directories in skip_dirs. Prints debug info about each file read.
+    Walks through repo_path, reads text files, and writes them to .txt files in output_dir.
+    Skips directories in skip_dirs. Includes debug logs.
     """
 
     combined_contents = []
@@ -89,13 +88,8 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     included_files = []
 
     for root, dirs, files in os.walk(repo_path, topdown=True):
-        # Debug: see what directories/files are found before skipping
         print(f"[DEBUG] Scanning '{root}' with {len(dirs)} subdirectories and {len(files)} files BEFORE skipping.")
-
-        # Skip directories
-        dirs[:] = [d for d in dirs if d not in skip_dirs]
-
-        # Debug: see what directories remain after skipping
+        dirs[:] = [d for d in dirs if d not in skip_dirs]  # Skip certain dirs
         print(f"[DEBUG] After skipping, scanning '{root}' with {len(dirs)} subdirectories.")
 
         for filename in files:
@@ -122,7 +116,7 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     print(f"[DEBUG] Total characters read across all files: {total_chars}")
     print(f"[DEBUG] Approximate tokens: {approx_tokens}")
 
-    # Create introduction block
+    # Introduction block
     included_files.sort()
     intro_lines = [
         "This is the code from the provided repository.\n\n",
@@ -130,7 +124,7 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     ]
     for sd in skip_dirs:
         intro_lines.append(f"- {sd}\n")
-    
+
     intro_lines.append("\nBelow is the file/folder structure of all **included** files:\n\n")
     for fpath in included_files:
         intro_lines.append(f"{fpath}\n")
@@ -138,11 +132,11 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
 
     intro_block = "".join(intro_lines)
 
-    # Prepend the introduction block to combined contents
+    # Prepend the introduction block
     combined_contents.insert(0, intro_block)
     total_chars += len(intro_block)
 
-    # Split into multiple text files if needed
+    # Split into multiple .txt files if needed
     file_count = 1
     current_chars = 0
     current_batch = []
@@ -171,37 +165,45 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
         print(f"[DEBUG] Wrote {output_filename} with {current_chars} characters "
               f"(approx {current_chars // chars_per_token} tokens).")
 
+
 def main():
     repo_input = input("Enter the repository location (GitHub URL or file path): ").strip()
-    
-    if repo_input.startswith("http://") or repo_input.startswith("https://"):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo_path = download_github_repo(repo_input, tmpdir)
-            repo_name = repo_input.rstrip('/').split('/')[-1]
-    else:
-        repo_path = repo_input
-        if not os.path.isdir(repo_path):
-            print("Invalid file path. Please make sure the directory exists and try again.")
-            return
-        repo_name = os.path.basename(repo_path)
 
-    max_tokens = 128000  # 128k tokens max per file
+    # We’ll assume you always want to make subdirectories in the same place as this script.
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # If the repo input is a URL, we’ll download it into a subdir named after the repo + '/extracted'
+    # If it's a local path, we just use that local path.
+    repo_name = repo_input.rstrip('/').split('/')[-1]
+    output_dir = os.path.join(script_dir, repo_name)
+
+    # Create the output directory if it doesn’t exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Subdirectory for the extracted repo
+    extracted_dir = os.path.join(output_dir, "extracted")
+
+    if repo_input.startswith("http://") or repo_input.startswith("https://"):
+        # Download + extract directly into extracted_dir
+        repo_path = download_github_repo(repo_input, extracted_dir)
+    else:
+        # If local, no need to download; just assume it's the path we want to process
+        # But if you want to physically copy it, you'd do so. Otherwise, just pass it directly.
+        repo_path = repo_input
+
+    # Adjust these as needed
+    max_tokens = 128000
     chars_per_token = 4
     max_chars = max_tokens * chars_per_token
 
     # Directories to skip
     skip_dirs = ["getid3", "iso-languages", "plugin-update-checker", "languages"]
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, repo_name)
-
-    # Create output directory if not exists
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
     process_repository(repo_path, output_dir, skip_dirs, max_chars, chars_per_token)
 
     print("Done.")
+
 
 if __name__ == "__main__":
     main()

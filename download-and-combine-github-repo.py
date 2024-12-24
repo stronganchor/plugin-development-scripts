@@ -198,7 +198,7 @@ def main():
     max_chars = max_tokens * chars_per_token
 
     # Directories to skip
-    skip_dirs = ["getid3", "iso-languages", "plugin-update-checker", "languages"]
+    skip_dirs = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media"]
 
     process_repository(repo_path, output_dir, skip_dirs, max_chars, chars_per_token)
 

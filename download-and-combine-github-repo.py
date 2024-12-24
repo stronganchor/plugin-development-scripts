@@ -79,12 +79,18 @@ def download_github_repo(repo_url: str, temp_dir: str, max_retries=3) -> str:
     return repo_path
 
 def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int):
+    """
+    Walks through repo_path, reads text files, and writes them to splitted .txt files in output_dir.
+    Skips directories in skip_dirs.
+    """
     combined_contents = []
     total_chars = 0
     included_files = []
 
     for root, dirs, files in os.walk(repo_path, topdown=True):
-        # Skip certain directories
+        # Print debug info about the directories and files
+        print(f"[DEBUG] Scanning {root}... found {len(files)} files before skipping.")
+        # Skip directories
         dirs[:] = [d for d in dirs if d not in skip_dirs]
 
         for file in files:
@@ -94,7 +100,8 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
             try:
                 with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-            except:
+            except Exception as e:
+                print(f"[DEBUG] Could not read file {filepath} due to: {e}")
                 content = "<Could not read file>"
             
             file_text = header + content + "\n\n"
@@ -109,7 +116,6 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
 
     # Create introduction block
     included_files.sort()
-
     intro_lines = [
         f"This is the code from the provided repository.\n\n",
         "Note: The following folders were excluded from the code extraction:\n"
@@ -117,19 +123,18 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     for sd in skip_dirs:
         intro_lines.append(f"- {sd}\n")
 
-    intro_lines.append("\n")
-    intro_lines.append("Below is the file/folder structure of all INCLUDED files:\n\n")
+    intro_lines.append("\nBelow is the file/folder structure of all INCLUDED files:\n\n")
     for fpath in included_files:
         intro_lines.append(f"{fpath}\n")
     intro_lines.append("\n\n")
 
     intro_block = "".join(intro_lines)
 
-    # Prepend the introduction block to combined_contents
+    # Prepend the introduction block
     combined_contents.insert(0, intro_block)
     total_chars += len(intro_block)
 
-    # Now we do the splitting
+    # Split into multiple text files if needed
     file_count = 1
     current_chars = 0
     current_batch = []
@@ -140,7 +145,9 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
             output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
             with open(output_filename, "w", encoding="utf-8") as outfile:
                 outfile.write("".join(current_batch))
-            print(f"Wrote {output_filename} with {current_chars} characters (approx {current_chars//chars_per_token} tokens).")
+            print(f"Wrote {output_filename} with {current_chars} characters "
+                  f"(approx {current_chars//chars_per_token} tokens).")
+
             file_count += 1
             current_batch = [file_text]
             current_chars = len(file_text)
@@ -153,8 +160,8 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
         output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
         with open(output_filename, "w", encoding="utf-8") as outfile:
             outfile.write("".join(current_batch))
-        print(f"Wrote {output_filename} with {current_chars} characters (approx {current_chars//chars_per_token} tokens).")
-
+        print(f"Wrote {output_filename} with {current_chars} characters "
+              f"(approx {current_chars//chars_per_token} tokens).")
 def main():
     repo_input = input("Enter the repository location (GitHub URL or file path): ").strip()
     

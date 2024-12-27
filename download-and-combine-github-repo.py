@@ -75,12 +75,14 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
     print(f"[DEBUG] Repository extracted to: {repo_path}")
     return repo_path
 
-def get_plugin_version(repo_path: str) -> str:
+def get_plugin_info(repo_path: str):
     """
-    Looks in the repo's top-level directory for a .php file that has "Version:"
-    in a plugin-style comment header. If found, returns that version string;
-    otherwise returns None.
+    Scans top-level .php files in the repo for Plugin Name and Version lines.
+    Returns (plugin_name, plugin_version). If either is missing, it returns None for that.
     """
+    plugin_name = None
+    plugin_version = None
+
     top_level_files = [
         f for f in os.listdir(repo_path)
         if os.path.isfile(os.path.join(repo_path, f))
@@ -92,25 +94,38 @@ def get_plugin_version(repo_path: str) -> str:
             try:
                 with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                     contents = f.read()
-                if "Version:" in contents:
-                    for line in contents.splitlines():
-                        if "Version:" in line:
-                            version_part = line.split("Version:", 1)[1].strip()
-                            version_part = version_part.strip("*/ ")
-                            if version_part:
-                                print(f"[DEBUG] Detected plugin version: {version_part}")
-                                return version_part
+                # Look for "Plugin Name:" and "Version:" lines
+                for line in contents.splitlines():
+                    if "Plugin Name:" in line:
+                        # e.g. "Plugin Name: My Awesome Plugin"
+                        name_part = line.split("Plugin Name:", 1)[1].strip()
+                        name_part = name_part.strip("*/ ")
+                        if name_part:
+                            plugin_name = name_part
+                            print(f"[DEBUG] Detected plugin name: {plugin_name}")
+
+                    if "Version:" in line:
+                        # e.g. "Version: 1.2.3"
+                        version_part = line.split("Version:", 1)[1].strip()
+                        version_part = version_part.strip("*/ ")
+                        if version_part:
+                            plugin_version = version_part
+                            print(f"[DEBUG] Detected plugin version: {plugin_version}")
+
+                # If found both, we can stop scanning further files
+                if plugin_name or plugin_version:
+                    break
             except Exception as e:
-                print(f"[DEBUG] Could not read {fname} for version check: {e}")
+                print(f"[DEBUG] Could not read {fname} for plugin info: {e}")
 
-    return None
+    return plugin_name, plugin_version
 
-def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int, plugin_version: str = None):
+def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int, plugin_name: str = None, plugin_version: str = None):
     """
     Walks through repo_path, reads text files, and writes them to one .txt file in output_dir.
-    Skips directories in skip_dirs. If plugin_version is provided, that version number
-    is appended to the output filename; otherwise we just use "all_code.txt".
-    If the file exists, it is overwritten.
+    Skips directories in skip_dirs. If plugin_name is found, that replaces 'all_code'.
+    If plugin_version is found, that is appended (i.e. `_v{plugin_version}`).
+    The file is overwritten if it already exists.
     """
 
     combined_contents = []
@@ -163,11 +178,15 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     combined_contents.insert(0, intro_block)
     total_chars += len(intro_block)
 
-    # Create a single output file name (overwrite if it exists)
+    # Decide on base filename
+    # If plugin_name is found, use that instead of all_code
+    base_name = plugin_name if plugin_name else "all_code"
+
+    # If plugin_version is found, append _v{version}
     if plugin_version:
-        output_filename = os.path.join(output_dir, f"all_code_v{plugin_version}.txt")
-    else:
-        output_filename = os.path.join(output_dir, "all_code.txt")
+        base_name += f"_v{plugin_version}"
+
+    output_filename = os.path.join(output_dir, f"{base_name}.txt")
 
     with open(output_filename, "w", encoding="utf-8") as outfile:
         outfile.write("".join(combined_contents))
@@ -196,8 +215,8 @@ def main():
     else:
         repo_path = repo_input  # local path
 
-    # Check for WP plugin version
-    plugin_version = get_plugin_version(repo_path)
+    # Check for WP plugin name & version
+    plugin_name, plugin_version = get_plugin_info(repo_path)
 
     # Set up token/char limits
     max_tokens = 128000
@@ -207,7 +226,15 @@ def main():
     # Directories to skip
     skip_dirs = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media"]
 
-    process_repository(repo_path, output_dir, skip_dirs, max_chars, chars_per_token, plugin_version)
+    process_repository(
+        repo_path,
+        output_dir,
+        skip_dirs,
+        max_chars,
+        chars_per_token,
+        plugin_name=plugin_name,
+        plugin_version=plugin_version
+    )
     print("Done.")
 
 if __name__ == "__main__":

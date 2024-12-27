@@ -32,7 +32,6 @@ def fetch_zip(url, max_retries=3, timeout=30):
 
     return None  # All attempts failed
 
-
 def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> str:
     """
     Downloads the GitHub repo zip (from 'main' or 'master') into extraction_dir and returns the path.
@@ -76,11 +75,54 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
     print(f"[DEBUG] Repository extracted to: {repo_path}")
     return repo_path
 
+def get_plugin_version(repo_path: str) -> str:
+    """
+    Looks in the repo's top-level directory for a .php file that has "Version:"
+    in a plugin-style comment header. If found, returns that version string; 
+    otherwise returns None.
+    """
+    # List top-level files in the extracted repo
+    top_level_files = [
+        f for f in os.listdir(repo_path)
+        if os.path.isfile(os.path.join(repo_path, f))
+    ]
 
-def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int):
+    for fname in top_level_files:
+        if fname.lower().endswith(".php"):
+            full_path = os.path.join(repo_path, fname)
+            try:
+                with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                    contents = f.read()
+                # Simple check for a "Version:" line in a plugin header.
+                # Typical WP plugin header includes something like:
+                #
+                # /*
+                #  * Plugin Name: ...
+                #  * Version: 1.2.3
+                #  */
+                #
+                # We’ll do a straightforward search. If found, we’ll parse out the portion after "Version:".
+                if "Version:" in contents:
+                    for line in contents.splitlines():
+                        if "Version:" in line:
+                            # Attempt to parse out the version number after "Version:"
+                            # e.g. "Version: 1.2.3"
+                            version_part = line.split("Version:", 1)[1].strip()
+                            # If there's a trailing comment star, etc., remove it
+                            version_part = version_part.strip("*/ ")
+                            if version_part:
+                                print(f"[DEBUG] Detected plugin version: {version_part}")
+                                return version_part
+            except Exception as e:
+                print(f"[DEBUG] Could not read {fname} for version check: {e}")
+
+    return None
+
+def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int, plugin_version: str = None):
     """
     Walks through repo_path, reads text files, and writes them to .txt files in output_dir.
     Skips directories in skip_dirs. Includes debug logs.
+    If plugin_version is provided, we append that version to the filenames.
     """
 
     combined_contents = []
@@ -144,7 +186,11 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     for file_text in combined_contents:
         if current_chars + len(file_text) > max_chars and current_chars > 0:
             # Write out the current batch
-            output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
+            if plugin_version:
+                output_filename = os.path.join(output_dir, f"all_code_v{plugin_version}_{file_count}.txt")
+            else:
+                output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
+
             with open(output_filename, "w", encoding="utf-8") as outfile:
                 outfile.write("".join(current_batch))
             print(f"[DEBUG] Wrote {output_filename} with {current_chars} characters "
@@ -159,7 +205,11 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
 
     # Write any remaining batch
     if current_batch:
-        output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
+        if plugin_version:
+            output_filename = os.path.join(output_dir, f"all_code_v{plugin_version}_{file_count}.txt")
+        else:
+            output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
+
         with open(output_filename, "w", encoding="utf-8") as outfile:
             outfile.write("".join(current_batch))
         print(f"[DEBUG] Wrote {output_filename} with {current_chars} characters "
@@ -189,8 +239,10 @@ def main():
         repo_path = download_github_repo(repo_input, extracted_dir)
     else:
         # If local, no need to download; just assume it's the path we want to process
-        # But if you want to physically copy it, you'd do so. Otherwise, just pass it directly.
         repo_path = repo_input
+
+    # Check if there's a WordPress plugin version in the main directory
+    plugin_version = get_plugin_version(repo_path)
 
     # Adjust these as needed
     max_tokens = 128000
@@ -200,10 +252,9 @@ def main():
     # Directories to skip
     skip_dirs = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media"]
 
-    process_repository(repo_path, output_dir, skip_dirs, max_chars, chars_per_token)
+    process_repository(repo_path, output_dir, skip_dirs, max_chars, chars_per_token, plugin_version)
 
     print("Done.")
-
 
 if __name__ == "__main__":
     main()

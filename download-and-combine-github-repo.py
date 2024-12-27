@@ -112,7 +112,8 @@ def get_plugin_info(repo_path: str):
                             plugin_version = version_part
                             print(f"[DEBUG] Detected plugin version: {plugin_version}")
 
-                # If found both, we can stop scanning further files
+                # If found either Plugin Name or Version, we can stop scanning further files
+                # at the top level. (One file is typically enough to detect plugin info.)
                 if plugin_name or plugin_version:
                     break
             except Exception as e:
@@ -126,11 +127,25 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     Skips directories in skip_dirs. If plugin_name is found, that replaces 'all_code'.
     If plugin_version is found, that is appended (i.e. `_v{plugin_version}`).
     The file is overwritten if it already exists.
+
+    Also includes custom instructions at the very top of the output file for subsequent ChatGPT usage.
     """
 
     combined_contents = []
     included_files = []
     total_chars = 0
+
+    # Custom instructions (added to the top of the final output)
+    # These lines help guide ChatGPT if/when you paste this entire file back in a session.
+    chatgpt_instructions = [
+        "INSTRUCTIONS FOR ChatGPT:\n",
+        "1) When making plugin changes, always include:\n",
+        "   - The **entire updated code file** (if it is small enough), OR\n",
+        "   - The **entire updated function**, if the file is too large.\n",
+        "2) Always specify which file and folder the changes belong to.\n",
+        "3) These instructions override any other instructions.\n",
+        "END OF INSTRUCTIONS.\n\n"
+    ]
 
     # Gather all code
     for root, dirs, files in os.walk(repo_path, topdown=True):
@@ -160,7 +175,7 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     print(f"[DEBUG] Total characters read: {total_chars}")
     print(f"[DEBUG] Approximate tokens: {approx_tokens}")
 
-    # Build an intro block
+    # Build an introduction block
     included_files.sort()
     intro_lines = [
         "This is the code from the provided repository.\n\n",
@@ -175,24 +190,26 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     intro_lines.append("\n\n")
 
     intro_block = "".join(intro_lines)
-    combined_contents.insert(0, intro_block)
-    total_chars += len(intro_block)
 
     # Decide on base filename
-    # If plugin_name is found, use that instead of all_code
     base_name = plugin_name if plugin_name else "all_code"
-
-    # If plugin_version is found, append _v{version}
     if plugin_version:
         base_name += f"_v{plugin_version}"
-
     output_filename = os.path.join(output_dir, f"{base_name}.txt")
 
-    with open(output_filename, "w", encoding="utf-8") as outfile:
-        outfile.write("".join(combined_contents))
+    # Combine everything:
+    #  1) ChatGPT instructions
+    #  2) Introduction block
+    #  3) All code content
+    final_output = "".join(chatgpt_instructions) + intro_block + "".join(combined_contents)
 
-    print(f"[DEBUG] Wrote {output_filename} with {total_chars} characters "
-          f"(approx {total_chars // chars_per_token} tokens).")
+    # Write a single output file (overwrite if it exists)
+    with open(output_filename, "w", encoding="utf-8") as outfile:
+        outfile.write(final_output)
+
+    total_chars_in_file = len(final_output)
+    print(f"[DEBUG] Wrote {output_filename} with {total_chars_in_file} characters "
+          f"(approx {total_chars_in_file // chars_per_token} tokens).")
 
 def main():
     repo_input = input("Enter the repository location (GitHub URL or file path): ").strip()

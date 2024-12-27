@@ -78,10 +78,9 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
 def get_plugin_version(repo_path: str) -> str:
     """
     Looks in the repo's top-level directory for a .php file that has "Version:"
-    in a plugin-style comment header. If found, returns that version string; 
+    in a plugin-style comment header. If found, returns that version string;
     otherwise returns None.
     """
-    # List top-level files in the extracted repo
     top_level_files = [
         f for f in os.listdir(repo_path)
         if os.path.isfile(os.path.join(repo_path, f))
@@ -93,22 +92,10 @@ def get_plugin_version(repo_path: str) -> str:
             try:
                 with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                     contents = f.read()
-                # Simple check for a "Version:" line in a plugin header.
-                # Typical WP plugin header includes something like:
-                #
-                # /*
-                #  * Plugin Name: ...
-                #  * Version: 1.2.3
-                #  */
-                #
-                # We’ll do a straightforward search. If found, we’ll parse out the portion after "Version:".
                 if "Version:" in contents:
                     for line in contents.splitlines():
                         if "Version:" in line:
-                            # Attempt to parse out the version number after "Version:"
-                            # e.g. "Version: 1.2.3"
                             version_part = line.split("Version:", 1)[1].strip()
-                            # If there's a trailing comment star, etc., remove it
                             version_part = version_part.strip("*/ ")
                             if version_part:
                                 print(f"[DEBUG] Detected plugin version: {version_part}")
@@ -120,18 +107,20 @@ def get_plugin_version(repo_path: str) -> str:
 
 def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_chars: int, chars_per_token: int, plugin_version: str = None):
     """
-    Walks through repo_path, reads text files, and writes them to .txt files in output_dir.
-    Skips directories in skip_dirs. Includes debug logs.
-    If plugin_version is provided, we append that version to the filenames.
+    Walks through repo_path, reads text files, and writes them to one .txt file in output_dir.
+    Skips directories in skip_dirs. If plugin_version is provided, that version number
+    is appended to the output filename; otherwise we just use "all_code.txt".
+    If the file exists, it is overwritten.
     """
 
     combined_contents = []
-    total_chars = 0
     included_files = []
+    total_chars = 0
 
+    # Gather all code
     for root, dirs, files in os.walk(repo_path, topdown=True):
         print(f"[DEBUG] Scanning '{root}' with {len(dirs)} subdirectories and {len(files)} files BEFORE skipping.")
-        dirs[:] = [d for d in dirs if d not in skip_dirs]  # Skip certain dirs
+        dirs[:] = [d for d in dirs if d not in skip_dirs]
         print(f"[DEBUG] After skipping, scanning '{root}' with {len(dirs)} subdirectories.")
 
         for filename in files:
@@ -139,7 +128,6 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
             relative_path = os.path.relpath(filepath, repo_path)
             header = f"--- {relative_path} ---\n"
 
-            # Try reading file content
             try:
                 with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
@@ -153,12 +141,11 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
             included_files.append(relative_path)
             total_chars += len(file_text)
 
-    # Approximate tokens
     approx_tokens = total_chars // chars_per_token
-    print(f"[DEBUG] Total characters read across all files: {total_chars}")
+    print(f"[DEBUG] Total characters read: {total_chars}")
     print(f"[DEBUG] Approximate tokens: {approx_tokens}")
 
-    # Introduction block
+    # Build an intro block
     included_files.sort()
     intro_lines = [
         "This is the code from the provided repository.\n\n",
@@ -173,48 +160,20 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     intro_lines.append("\n\n")
 
     intro_block = "".join(intro_lines)
-
-    # Prepend the introduction block
     combined_contents.insert(0, intro_block)
     total_chars += len(intro_block)
 
-    # Split into multiple .txt files if needed
-    file_count = 1
-    current_chars = 0
-    current_batch = []
+    # Create a single output file name (overwrite if it exists)
+    if plugin_version:
+        output_filename = os.path.join(output_dir, f"all_code_v{plugin_version}.txt")
+    else:
+        output_filename = os.path.join(output_dir, "all_code.txt")
 
-    for file_text in combined_contents:
-        if current_chars + len(file_text) > max_chars and current_chars > 0:
-            # Write out the current batch
-            if plugin_version:
-                output_filename = os.path.join(output_dir, f"all_code_v{plugin_version}_{file_count}.txt")
-            else:
-                output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
+    with open(output_filename, "w", encoding="utf-8") as outfile:
+        outfile.write("".join(combined_contents))
 
-            with open(output_filename, "w", encoding="utf-8") as outfile:
-                outfile.write("".join(current_batch))
-            print(f"[DEBUG] Wrote {output_filename} with {current_chars} characters "
-                  f"(approx {current_chars // chars_per_token} tokens).")
-
-            file_count += 1
-            current_batch = [file_text]
-            current_chars = len(file_text)
-        else:
-            current_batch.append(file_text)
-            current_chars += len(file_text)
-
-    # Write any remaining batch
-    if current_batch:
-        if plugin_version:
-            output_filename = os.path.join(output_dir, f"all_code_v{plugin_version}_{file_count}.txt")
-        else:
-            output_filename = os.path.join(output_dir, f"all_code_{file_count}.txt")
-
-        with open(output_filename, "w", encoding="utf-8") as outfile:
-            outfile.write("".join(current_batch))
-        print(f"[DEBUG] Wrote {output_filename} with {current_chars} characters "
-              f"(approx {current_chars // chars_per_token} tokens).")
-
+    print(f"[DEBUG] Wrote {output_filename} with {total_chars} characters "
+          f"(approx {total_chars // chars_per_token} tokens).")
 
 def main():
     repo_input = input("Enter the repository location (GitHub URL or file path): ").strip()
@@ -222,29 +181,25 @@ def main():
     # We’ll assume you always want to make subdirectories in the same place as this script.
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # If the repo input is a URL, we’ll download it into a subdir named after the repo + '/extracted'
-    # If it's a local path, we just use that local path.
+    # If the repo input is a URL, download and extract to a subdir; otherwise, use the local path
     repo_name = repo_input.rstrip('/').split('/')[-1]
     output_dir = os.path.join(script_dir, repo_name)
-
-    # Create the output directory if it doesn’t exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     # Subdirectory for the extracted repo
     extracted_dir = os.path.join(output_dir, "extracted")
 
+    # Determine if input is a URL or local path
     if repo_input.startswith("http://") or repo_input.startswith("https://"):
-        # Download + extract directly into extracted_dir
         repo_path = download_github_repo(repo_input, extracted_dir)
     else:
-        # If local, no need to download; just assume it's the path we want to process
-        repo_path = repo_input
+        repo_path = repo_input  # local path
 
-    # Check if there's a WordPress plugin version in the main directory
+    # Check for WP plugin version
     plugin_version = get_plugin_version(repo_path)
 
-    # Adjust these as needed
+    # Set up token/char limits
     max_tokens = 128000
     chars_per_token = 4
     max_chars = max_tokens * chars_per_token
@@ -253,7 +208,6 @@ def main():
     skip_dirs = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media"]
 
     process_repository(repo_path, output_dir, skip_dirs, max_chars, chars_per_token, plugin_version)
-
     print("Done.")
 
 if __name__ == "__main__":

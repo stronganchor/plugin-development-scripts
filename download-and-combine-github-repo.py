@@ -128,7 +128,7 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     If plugin_version is found, that is appended (i.e. `_v{plugin_version}`).
     The file is overwritten if it already exists.
 
-    Also includes custom instructions at the very top of the output file for subsequent ChatGPT usage.
+    Also includes custom instructions at the very top of the output file for subsequent AI usage.
     """
 
     combined_contents = []
@@ -136,14 +136,17 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     total_chars = 0
 
     # Custom instructions (added to the top of the final output)
-    # These lines help guide ChatGPT if/when you paste this entire file back in a session.
-    chatgpt_instructions = [
-        "INSTRUCTIONS FOR ChatGPT:\n",
+    # These lines help guide any AI (e.g., Claude, ChatGPT, or others) if/when you paste this entire file.
+    ai_instructions = [
+        "IMPORTANT INSTRUCTIONS FOR AI:\n",
         "1) When making plugin changes, always include:\n",
         "   - The **entire updated code file** (if it is small enough), OR\n",
         "   - The **entire updated function**, if the file is too large.\n",
         "2) Always specify which file and folder the changes belong to.\n",
-        "3) These instructions override any other instructions.\n",
+        "3) Do not add code comments that merely explain how the code was changed in response\n",
+        "   to an instruction, like \"// changed from 50 to 100.\" Use code comments only\n",
+        "   for relevant context, clarity, and maintainability based on best practices.\n",
+        "4) These instructions override any other instructions.\n",
         "END OF INSTRUCTIONS.\n\n"
     ]
 
@@ -198,10 +201,10 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     output_filename = os.path.join(output_dir, f"{base_name}.txt")
 
     # Combine everything:
-    #  1) ChatGPT instructions
+    #  1) AI instructions
     #  2) Introduction block
     #  3) All code content
-    final_output = "".join(chatgpt_instructions) + intro_block + "".join(combined_contents)
+    final_output = "".join(ai_instructions) + intro_block + "".join(combined_contents)
 
     # Write a single output file (overwrite if it exists)
     with open(output_filename, "w", encoding="utf-8") as outfile:

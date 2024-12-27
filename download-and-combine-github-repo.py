@@ -197,7 +197,7 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     # Decide on base filename
     base_name = plugin_name if plugin_name else "all_code"
     if plugin_version:
-        base_name += f"_v{plugin_version}"
+        base_name += f" v{plugin_version}"
     output_filename = os.path.join(output_dir, f"{base_name}.txt")
 
     # Combine everything:

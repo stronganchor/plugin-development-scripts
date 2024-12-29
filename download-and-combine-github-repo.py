@@ -136,17 +136,23 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     total_chars = 0
 
     # Custom instructions (added to the top of the final output)
-    # These lines help guide any AI (e.g., Claude, ChatGPT, or others) if/when you paste this entire file.
     ai_instructions = [
-        "IMPORTANT INSTRUCTIONS FOR AI:\n",
-        "1) When making plugin changes, always include:\n",
+        "IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:\n",
+        "1) When making code changes, always include:\n",
         "   - The **entire updated code file** (if it is small enough), OR\n",
-        "   - The **entire updated function**, if the file is too large.\n",
+        "   - The **entire updated function**, if only updating one function in a large code file.\n",
         "2) Always specify which file and folder the changes belong to.\n",
-        "3) Do not add code comments that merely explain how the code was changed in response\n",
-        "   to an instruction, like \"// changed from 50 to 100.\" Use code comments only\n",
-        "   for relevant context, clarity, and maintainability based on best practices.\n",
-        "4) These instructions override any other instructions.\n",
+        "3) Only add relevant code comments, and do NOT include comments that just describe\n",
+        "   how or why you changed something (for example, \"// here is the updated code\"), or\n",
+        "   references to the user's instructions. Comments are strictly for logic, clarity, and maintainability.\n",
+        "4) Make code changes that are easy to review with a diff tool.\n"
+        "   - Keep the existing file structure and code ordering intact. Avoid reordering or\n",
+        "     removing functions that are unrelated to the requested changes.\n",
+        "   - If you're adding new code (e.g. helper functions), you may insert it wherever it\n",
+        "     makes sense for readability (e.g. near its primary caller or at the bottom of the file).\n",
+        "   - Avoid large-scale rearrangements or reformattings that create unnecessary diff noise.\n",
+        "   - Do not delete or modify comments that are unrelated to the code changes you are making.\n",
+        "\n",
         "END OF INSTRUCTIONS.\n\n"
     ]
 

@@ -125,7 +125,7 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     """
     Walks through repo_path, reads text files, and writes them to one .txt file in output_dir.
     Skips directories in skip_dirs. If plugin_name is found, that replaces 'all_code'.
-    If plugin_version is found, that is appended (i.e. `_v{plugin_version}`).
+    If plugin_version is found, that is appended (i.e. v{plugin_version}).
     The file is overwritten if it already exists.
 
     Also includes custom instructions at the very top of the output file for subsequent AI usage.
@@ -221,10 +221,36 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
           f"(approx {total_chars_in_file // chars_per_token} tokens).")
 
 def main():
-    repo_input = input("Enter the repository location (GitHub URL or file path): ").strip()
-
-    # We’ll assume you always want to make subdirectories in the same place as this script.
+    # Determine the script directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    url_file = os.path.join(script_dir, 'last_url.txt')  # File to store the last URL
+
+    # Read the last URL if it exists
+    if os.path.exists(url_file):
+        with open(url_file, 'r') as f:
+            last_url = f.read().strip()
+        if last_url:
+            prompt = f"Enter the repository location (GitHub URL or file path) [default: {last_url}]: "
+        else:
+            last_url = ''
+            prompt = "Enter the repository location (GitHub URL or file path): "
+    else:
+        last_url = ''
+        prompt = "Enter the repository location (GitHub URL or file path): "
+
+    # Prompt the user for input, showing the default if available
+    repo_input = input(prompt).strip()
+
+    if not repo_input and last_url:
+        repo_input = last_url
+        print(f"Using the default URL: {repo_input}")
+    elif repo_input:
+        # Save the new URL to the file
+        with open(url_file, 'w') as f:
+            f.write(repo_input)
+    else:
+        print("No repository URL provided and no default URL set.")
+        return  # Exit the script gracefully
 
     # If the repo input is a URL, download and extract to a subdir; otherwise, use the local path
     repo_name = repo_input.rstrip('/').split('/')[-1]
@@ -237,9 +263,17 @@ def main():
 
     # Determine if input is a URL or local path
     if repo_input.startswith("http://") or repo_input.startswith("https://"):
-        repo_path = download_github_repo(repo_input, extracted_dir)
+        try:
+            repo_path = download_github_repo(repo_input, extracted_dir)
+        except Exception as e:
+            print(f"Failed to download and extract the repository: {e}")
+            return  # Exit the script gracefully
     else:
-        repo_path = repo_input  # local path
+        if os.path.exists(repo_input):
+            repo_path = repo_input  # local path
+        else:
+            print(f"The provided local path does not exist: {repo_input}")
+            return  # Exit the script gracefully
 
     # Check for WP plugin name & version
     plugin_name, plugin_version = get_plugin_info(repo_path)

@@ -91,7 +91,7 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
 def get_plugin_info(repo_path: str):
     """
     Scans top-level .php files in the repo for Plugin Name and Version lines.
-    Returns (plugin_name, plugin_version). If either is missing, it returns None for that.
+    Returns (plugin_name, plugin_version). If either is missing, returns None.
     """
     plugin_name = None
     plugin_version = None
@@ -123,7 +123,6 @@ def get_plugin_info(repo_path: str):
                             plugin_version = version_part
                             print(f"[DEBUG] Detected plugin version: {plugin_version}")
 
-                # If found either plugin name or version, stop scanning further
                 if plugin_name or plugin_version:
                     break
             except Exception as e:
@@ -132,7 +131,8 @@ def get_plugin_info(repo_path: str):
     return plugin_name, plugin_version
 
 # --------------------------------------------------------------------
-# This function creates the combined code text (no line numbers) + AI instructions.
+# Create the combined code text (no line numbers) + updated AI instructions.
+
 def process_repository(repo_path: str,
                        output_dir: str,
                        skip_dirs: list,
@@ -144,44 +144,44 @@ def process_repository(repo_path: str,
     Walks through repo_path, reads text files, and writes them to one .txt file in output_dir.
     Skips directories in skip_dirs. If plugin_name is found, that replaces 'all_code'.
     If plugin_version is found, that is appended (e.g. "v{plugin_version}").
-    The file is overwritten if it already exists.
-
-    1) We do NOT add line numbers.
-    2) The top of the output file instructs AI to provide entire function replacements in JSON form:
-       [ 
-         {
-           "file": "relative/path/to/file.js",
-           "functionName": "myFunction",
-           "updatedCode": "function myFunction() {...}"
-         }
-       ]
+    Returns the combined code text as a string.
     """
 
     combined_contents = []
     included_files = []
     total_chars = 0
 
-    # Custom AI instructions (added to the top of the final output)
+    # Updated custom AI instructions
     ai_instructions = [
         "IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:\n",
-        "1) When proposing code changes, output them as **an array of JSON objects**.\n",
-        "   Each object in the array should contain:\n",
-        "       \"file\"         : The relative path of the file.\n",
-        "       \"functionName\" : The name of the function being replaced.\n",
-        "       \"updatedCode\"  : The **entire** updated code for that function.\n",
+        "When you propose code changes, output them as an array of JSON objects.\n",
+        "Each object should have:\n",
+        "  \"file\"         : The relative path of the file.\n",
+        "  \"functionName\" : The name of the function to affect.\n",
+        "  \"action\"       : one of [\"insert before\", \"insert after\", \"delete\", \"replace\"].\n",
+        "  \"code\"         : If you are inserting or replacing, include the code to insert/replace.\n",
         "\n",
-        "   Example:\n",
-        "   [\n",
-        "     {\n",
-        "       \"file\": \"assets/js/quiz.js\",\n",
-        "       \"functionName\": \"resetQuizState\",\n",
-        "       \"updatedCode\": \"function resetQuizState() {\\n    ... entire new code ... \\n}\"\n",
-        "     }\n",
-        "   ]\n",
+        "Example:\n",
+        "[\n",
+        "  {\n",
+        "    \"file\": \"assets/js/quiz.js\",\n",
+        "    \"functionName\": \"resetQuizState\",\n",
+        "    \"action\": \"replace\",\n",
+        "    \"code\": \"function resetQuizState() {\\n    // entire new code here\\n}\"\n",
+        "  },\n",
+        "  {\n",
+        "    \"file\": \"assets/js/quiz.js\",\n",
+        "    \"functionName\": \"randomHelper\",\n",
+        "    \"action\": \"delete\"\n",
+        "  }\n",
+        "]\n",
         "\n",
-        "2) Provide updated code for entire functions, rather than partial line-based edits.\n",
-        "3) Keep changes minimal and do not remove or modify unrelated code.\n",
-        "4) Do not rename or remove existing functions unless explicitly asked.\n",
+        "NOTES:\n",
+        "- \"insert before\" places the new code right above the function definition line.\n",
+        "- \"insert after\" places new code immediately after the function's final closing brace.\n",
+        "- \"delete\" removes the function entirely.\n",
+        "- \"replace\" replaces the entire function.\n",
+        "- Keep changes minimal and do not modify unrelated code.\n",
         "\n",
         "END OF INSTRUCTIONS.\n\n"
     ]
@@ -205,7 +205,6 @@ def process_repository(repo_path: str,
                 print(f"[DEBUG] Could not read file '{relative_path}' - {e}")
                 content = "<Could not read file>"
 
-            # No line numbering: just raw content
             file_text = header + content + "\n\n"
             combined_contents.append(file_text)
             included_files.append(relative_path)
@@ -215,7 +214,7 @@ def process_repository(repo_path: str,
     print(f"[DEBUG] Total characters read: {total_chars}")
     print(f"[DEBUG] Approx tokens: {approx_tokens}")
 
-    # Introduction block
+    # Build introduction block
     included_files.sort()
     intro_lines = [
         "This is the code from the provided repository.\n\n",
@@ -231,7 +230,7 @@ def process_repository(repo_path: str,
 
     intro_block = "".join(intro_lines)
 
-    # Decide on the output file name
+    # Decide on base filename
     base_name = plugin_name if plugin_name else "all_code"
     if plugin_version:
         base_name += f" v{plugin_version}"
@@ -248,15 +247,104 @@ def process_repository(repo_path: str,
     print(f"[DEBUG] Wrote {output_filename} with {total_chars_in_file} characters "
           f"(approx {total_chars_in_file // chars_per_token} tokens).")
 
-    return final_output  # Return the text so we can copy to clipboard
+    return final_output  # Return the text for clipboard use
 
 # --------------------------------------------------------------------
-# The "apply changes" function (still line-based for now)
-def apply_changes(repo_path, json_content):
+# Naive function-level changes
+def apply_function_level_change(lines, func_name, action, code):
     """
-    Parse the JSON content (array of changes) and apply them to files in repo_path.
-    Currently uses line-based logic:
-      file, line, action, content
+    lines       : list of lines from the file
+    func_name   : e.g. 'resetQuizState'
+    action      : one of [insert before, insert after, delete, replace]
+    code        : string (new code) for insert/replace. may be None if deleting.
+
+    Returns updated list of lines after applying the action.
+    """
+
+    # We look for a line containing "function <func_name>".
+    # This is naive; it won't handle multi-line definitions or advanced syntax.
+    # You might expand or refine logic as needed.
+    pattern = f"function {func_name}("
+    start_idx = None
+
+    # Find the line that starts the function
+    for i, line in enumerate(lines):
+        if pattern in line:
+            start_idx = i
+            break
+
+    if start_idx is None:
+        print(f"[WARNING] Could not find function {func_name}. No changes applied.")
+        return lines
+
+    # Insert Before
+    if action == "insert before":
+        # Just insert the code lines before the start_idx
+        if code is not None:
+            new_code_lines = code.splitlines(True)  # keep line endings
+            lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
+        else:
+            print(f"[WARNING] 'insert before' but no code provided for {func_name}.")
+        return lines
+
+    # For actions that require us to parse the function body:
+    # We'll do a naive bracket-matching approach to find the end.
+    brace_depth = 0
+    func_end_idx = start_idx
+    found_open_brace = False
+
+    # Start from the line we found, look for { and }
+    for j in range(start_idx, len(lines)):
+        if '{' in lines[j]:
+            brace_depth += lines[j].count('{')
+            found_open_brace = True
+        if '}' in lines[j] and found_open_brace:
+            brace_depth -= lines[j].count('}')
+
+        if found_open_brace and brace_depth <= 0:
+            func_end_idx = j
+            break
+
+    # Insert After
+    if action == "insert after":
+        # Place code right after func_end_idx
+        if code is not None:
+            new_code_lines = code.splitlines(True)
+            lines = lines[:func_end_idx+1] + new_code_lines + lines[func_end_idx+1:]
+        else:
+            print(f"[WARNING] 'insert after' but no code provided for {func_name}.")
+        return lines
+
+    # Delete the function
+    if action == "delete":
+        # Remove lines from start_idx to func_end_idx inclusive
+        del lines[start_idx:func_end_idx+1]
+        return lines
+
+    # Replace
+    if action == "replace":
+        if code is None:
+            print(f"[WARNING] 'replace' action but no code provided for {func_name}.")
+            return lines
+        # Remove the old function
+        del lines[start_idx:func_end_idx+1]
+        # Insert the new code in that position
+        new_code_lines = code.splitlines(True)
+        lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
+        return lines
+
+    print(f"[WARNING] Unknown action '{action}' for {func_name}. No changes applied.")
+    return lines
+
+def apply_function_level_changes(repo_path, json_content):
+    """
+    Expect JSON array. Each object:
+      {
+        "file": "relative/path/to/file.js",
+        "functionName": "resetQuizState",
+        "action": "insert before|insert after|delete|replace",
+        "code": "... code ..."
+      }
     """
     try:
         changes = json.loads(json_content)
@@ -271,15 +359,17 @@ def apply_changes(repo_path, json_content):
     for change in changes:
         if not isinstance(change, dict):
             continue
-        required_keys = ["file", "line", "action"]
+        required_keys = ["file", "functionName", "action"]
         if not all(k in change for k in required_keys):
+            print(f"[WARNING] Incomplete change object: {change}")
             continue
 
         file_rel = change["file"]
-        line_num = change["line"]  # expected int
+        func_name = change["functionName"]
         action = change["action"].lower()
-        content = change.get("content", None)
+        code = change.get("code", None)
 
+        # Validate
         target_file = os.path.join(repo_path, file_rel)
         if not os.path.exists(target_file):
             print(f"[WARNING] File does not exist: {target_file}")
@@ -293,39 +383,14 @@ def apply_changes(repo_path, json_content):
             print(f"[ERROR] Could not read file '{target_file}' - {e}")
             continue
 
-        # Apply changes
-        if action == "delete":
-            if 1 <= line_num <= len(lines):
-                lines.pop(line_num - 1)
-            else:
-                print(f"[WARNING] Invalid line number {line_num} for delete in {file_rel}.")
-        elif action == "replace":
-            if content is None:
-                print(f"[WARNING] 'replace' action without 'content' in {file_rel}.")
-            elif 1 <= line_num <= len(lines):
-                lines[line_num - 1] = content + "\n"
-            else:
-                print(f"[WARNING] Invalid line number {line_num} for replace in {file_rel}.")
-        elif action == "insert before":
-            if content is None:
-                print(f"[WARNING] 'insert before' action without 'content' in {file_rel}.")
-            else:
-                index = max(0, line_num - 1)
-                lines.insert(index, content + "\n")
-        elif action == "insert after":
-            if content is None:
-                print(f"[WARNING] 'insert after' action without 'content' in {file_rel}.")
-            else:
-                index = min(line_num, len(lines))
-                lines.insert(index, content + "\n")
-        else:
-            print(f"[WARNING] Unknown action '{action}' in {file_rel}. Skipping.")
+        # Apply the change
+        updated_lines = apply_function_level_change(lines, func_name, action, code)
 
-        # Write back
+        # Write updated lines
         try:
             with open(target_file, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
-            print(f"[INFO] Changes applied to {file_rel}")
+                f.writelines(updated_lines)
+            print(f"[INFO] Function-level changes applied to {file_rel}")
         except Exception as e:
             print(f"[ERROR] Could not write file '{target_file}' - {e}")
 
@@ -432,7 +497,7 @@ def do_apply_changes():
     Called when user clicks 'Apply Changes'.
     1. Get the folder path for applying changes.
     2. Parse JSON from text field.
-    3. Apply changes to that folder.
+    3. Apply changes at a *function level*.
     """
     repo_path = apply_path_var.get().strip()
     if not repo_path:
@@ -442,7 +507,7 @@ def do_apply_changes():
         messagebox.showerror("Error", f"The specified path is not a directory:\n{repo_path}")
         return
 
-    # Save the path for future sessions
+    # Save the path
     save_last_path(LAST_APPLY_PATH_FILE, repo_path)
 
     json_input = text_json.get("1.0", tk.END).strip()
@@ -450,13 +515,13 @@ def do_apply_changes():
         messagebox.showwarning("No JSON", "Please paste JSON instructions for changes.")
         return
 
-    apply_changes(repo_path, json_input)
-    messagebox.showinfo("Done", "Code changes have been applied.")
+    apply_function_level_changes(repo_path, json_input)
+    messagebox.showinfo("Done", "Function-level code changes have been applied.")
 
 # --------------------------------------------------------------------
 # Main UI Setup
 root = tk.Tk()
-root.title("Combined Code Tool")
+root.title("Combined Code Tool (Function-Level Changes)")
 
 # Frame for "Download & Combine"
 frame_combine = tk.LabelFrame(root, text="Download & Combine Code")
@@ -473,7 +538,7 @@ combine_btn = tk.Button(frame_combine, text="Download & Combine", command=do_dow
 combine_btn.pack(side=tk.LEFT, padx=5)
 
 # Frame for "Apply Changes"
-frame_apply = tk.LabelFrame(root, text="Apply JSON Changes")
+frame_apply = tk.LabelFrame(root, text="Apply JSON Changes (Function-Level)")
 frame_apply.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
 apply_path_var = tk.StringVar(value=load_last_path(LAST_APPLY_PATH_FILE))

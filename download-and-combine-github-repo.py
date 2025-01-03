@@ -240,6 +240,7 @@ def main():
 
     # Prompt the user for input, showing the default if available
     repo_input = input(prompt).strip()
+    repo_input = repo_input.strip('"')
 
     if not repo_input and last_url:
         repo_input = last_url

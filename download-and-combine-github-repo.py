@@ -135,28 +135,24 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
     included_files = []
     total_chars = 0
 
-    # Custom instructions (added to the top of the final output)
+    # Custom AI instructions (added to the top of the final output)
     ai_instructions = [
         "IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:\n",
-        "1) When making code changes, always include:\n",
-        "   - The **entire updated code file** (if it is small enough), OR\n",
-        "   - The **entire updated function**, if only updating one function in a large code file.\n",
-        "2) Always specify which file and folder the changes belong to.\n",
-        "3) Only add relevant code comments, and do NOT include comments that just describe\n",
-        "   how or why you changed something (for example, \"// here is the updated code\"), or\n",
-        "   references to the user's instructions. Comments are strictly for logic, clarity, and maintainability.\n",
-        "4) Make code changes that are easy to review with a diff tool.\n"
-        "   - Keep the existing file structure and code ordering intact. Avoid reordering or\n",
-        "     removing functions that are unrelated to the requested changes.\n",
-        "   - If you're adding new code (e.g. helper functions), you may insert it wherever it\n",
-        "     makes sense for readability (e.g. near its primary caller or at the bottom of the file).\n",
-        "   - Avoid large-scale rearrangements or reformattings that create unnecessary diff noise.\n",
-        "   - Do not delete or modify comments that are unrelated to the code changes you are making.\n",
+        "1) When making code changes, output them **as JSON** in an array.\n",
+        "   Each object in the array should have:\n",
+        "       \"file\"   : the relative path of the file to be modified\n",
+        "       \"line\"   : the line number to change\n",
+        "       \"action\" : one of [\"insert\", \"delete\", \"replace\"]\n",
+        "       \"content\": the new line or block of code (if using \"insert\" or \"replace\").\n",
+        "\n",
+        "2) Only add relevant code comments, strictly for logic/clarity.\n",
+        "3) Keep changes minimal to avoid unnecessary diff noise.\n",
+        "4) Do not remove or modify unrelated code or comments.\n",
         "\n",
         "END OF INSTRUCTIONS.\n\n"
     ]
 
-    # Gather all code
+    # Walk through the repository and collect file contents
     for root, dirs, files in os.walk(repo_path, topdown=True):
         print(f"[DEBUG] Scanning '{root}' with {len(dirs)} subdirectories and {len(files)} files BEFORE skipping.")
         dirs[:] = [d for d in dirs if d not in skip_dirs]
@@ -175,7 +171,14 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
                 print(f"[DEBUG] Could not read file '{relative_path}' - {e}")
                 content = "<Could not read file>"
 
-            file_text = header + content + "\n\n"
+            # Add line numbers to the file content
+            numbered_lines = []
+            for i, line in enumerate(content.splitlines(), start=1):
+                # We keep the original line endings but prefix with a line number
+                numbered_lines.append(f"{i:4}: {line}")
+            numbered_content = "\n".join(numbered_lines)
+
+            file_text = header + numbered_content + "\n\n"
             combined_contents.append(file_text)
             included_files.append(relative_path)
             total_chars += len(file_text)
@@ -206,10 +209,10 @@ def process_repository(repo_path: str, output_dir: str, skip_dirs: list, max_cha
         base_name += f" v{plugin_version}"
     output_filename = os.path.join(output_dir, f"{base_name}.txt")
 
-    # Combine everything:
-    #  1) AI instructions
-    #  2) Introduction block
-    #  3) All code content
+    # Combine everything into one output file:
+    # 1) AI instructions
+    # 2) Introduction block
+    # 3) All code content (with line numbers)
     final_output = "".join(ai_instructions) + intro_block + "".join(combined_contents)
 
     # Write a single output file (overwrite if it exists)

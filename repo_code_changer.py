@@ -5,6 +5,9 @@ import requests
 import zipfile
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import openai
+
+from openai import OpenAI
 
 # --------------------------------------------------------------------
 # Files that store last-used paths (so we can restore defaults)
@@ -13,6 +16,82 @@ LAST_APPLY_PATH_FILE   = 'last_apply_path.txt'
 
 # Directories to skip when creating combined code:
 SKIP_DIRS = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media"]
+
+# Fetch the API key from environment variables
+api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    print("Error: OPENAI_API_KEY environment variable is not set.")
+    exit(1)
+
+openai.api_key = api_key
+
+# Function to send data to OpenAI
+def send_to_openai():
+    raw_path = combine_path_var.get().strip()
+    if not raw_path:
+        messagebox.showerror("Error", "No repository URL or path provided.")
+        return
+
+    # Check if the input is a URL
+    if raw_path.startswith("http://") or raw_path.startswith("https://"):
+        # Download and extract the repository
+        try:
+            output_dir = os.path.join(os.getcwd(), "combined_output")
+            extracted_dir = os.path.join(output_dir, "extracted")
+            repo_path = download_github_repo(raw_path, extracted_dir)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to download repository: {e}")
+            return
+    elif os.path.isdir(raw_path):
+        # Use the directory directly if it exists
+        repo_path = raw_path
+    else:
+        messagebox.showerror("Error", f"Invalid path or URL: {raw_path}")
+        return
+
+    # Process the repository to combine code
+    try:
+        combined_code = process_repository(
+            repo_path,
+            output_dir=os.path.join(os.getcwd(), "combined_output"),
+            skip_dirs=SKIP_DIRS,
+            max_chars=512000,
+            chars_per_token=4
+        )
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to process repository: {e}")
+        return
+
+    # Get the user prompt
+    user_prompt = user_prompt_var.get("1.0", tk.END).strip()
+    if not user_prompt:
+        messagebox.showwarning("Warning", "No prompt provided for OpenAI.")
+        return
+
+    # Prepare payload for OpenAI API
+    messages = [
+        {"role": "system", "content": "You are a coding assistant."},
+        {"role": "user", "content": f"{combined_code}\n\n{user_prompt}"}
+    ]
+
+    # Call OpenAI API
+    try:
+        client = OpenAI()
+
+        response = client.chat.completions.create(
+            messages=[{
+                "role": "user",
+                "content": f"{combined_code}\n\n{user_prompt}",
+            }],
+            model="o1-preview",
+        )
+        response_content = response.choices[0].message.content
+        text_json.delete("1.0", tk.END)
+        text_json.insert(tk.END, response_content)
+        messagebox.showinfo("Success", "Response received from OpenAI!")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to communicate with OpenAI: {e}")
 
 # --------------------------------------------------------------------
 # Helper functions from your "latest version" script
@@ -521,7 +600,7 @@ def do_apply_changes():
 # --------------------------------------------------------------------
 # Main UI Setup
 root = tk.Tk()
-root.title("Combined Code Tool (Function-Level Changes)")
+root.title("Repo Code Changer")
 
 # Frame for "Download & Combine"
 frame_combine = tk.LabelFrame(root, text="Download & Combine Code")
@@ -536,6 +615,24 @@ browse_btn1 = tk.Button(frame_combine, text="Browse...", command=browse_folder_f
 browse_btn1.pack(side=tk.LEFT, padx=5)
 combine_btn = tk.Button(frame_combine, text="Download & Combine", command=do_download_and_combine)
 combine_btn.pack(side=tk.LEFT, padx=5)
+
+# Frame for "User Prompt"
+frame_prompt = tk.LabelFrame(root, text="User Prompt")
+frame_prompt.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+user_prompt_var = tk.Text(frame_prompt, wrap=tk.WORD, height=5)
+user_prompt_var.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+# Frame for "JSON Response"
+frame_response = tk.LabelFrame(root, text="JSON Response from OpenAI")
+frame_response.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+text_json = tk.Text(frame_response, wrap=tk.NONE, height=10)
+text_json.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+# Button to Send to OpenAI
+send_btn = tk.Button(root, text="Send to OpenAI", command=send_to_openai)
+send_btn.pack(pady=10)
 
 # Frame for "Apply Changes"
 frame_apply = tk.LabelFrame(root, text="Apply JSON Changes (Function-Level)")

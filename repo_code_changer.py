@@ -123,10 +123,10 @@ def send_to_openai():
         response_content = response.choices[0].message.content
 
         # Extract JSON array from the response_content
-       start = response_content.find('[')
-       end = response_content.rfind(']')
-    
-       if start != -1 and end != -1 and start < end:
+        start = response_content.find('[')
+        end = response_content.rfind(']')
+
+        if start != -1 and end != -1 and start < end:
            json_only = response_content[start:end+1]
            try:
                # Validate JSON
@@ -136,9 +136,9 @@ def send_to_openai():
                response_content = formatted_json
            except json.JSONDecodeError as e:
                messagebox.showerror("JSON Error", f"Failed to parse JSON from response:\n{e}")
-       else:
+        else:
            messagebox.showerror("Format Error", "The response does not contain a valid JSON array.")
-        
+
         text_json.delete("1.0", tk.END)
         text_json.insert(tk.END, response_content)
         messagebox.showinfo("Success", "Response received from OpenAI!")

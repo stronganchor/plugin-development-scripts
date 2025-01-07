@@ -489,6 +489,8 @@ def apply_function_level_changes(repo_path, json_content):
 
         # Validate
         target_file = os.path.join(repo_path, file_rel)
+        file_extension = os.path.splitext(file_rel)[1]
+
         if not os.path.exists(target_file):
             print(f"[WARNING] File does not exist: {target_file}")
             continue
@@ -502,7 +504,7 @@ def apply_function_level_changes(repo_path, json_content):
             continue
 
         # Apply the change
-        updated_lines = apply_function_level_change(lines, func_name, action, code)
+        updated_lines = apply_function_level_change(lines, func_name, action, code, file_extension)
 
         # Write updated lines
         try:

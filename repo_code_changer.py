@@ -6,6 +6,7 @@ import zipfile
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import openai
+import re
 
 from openai import OpenAI
 
@@ -380,51 +381,80 @@ def apply_function_level_change(lines, func_name, action, code, file_extension):
 def apply_python_function_change(lines, func_name, action, code):
     """
     Handles function-level changes for Python files.
-    """
-    pattern = f"def {func_name}("
-    start_idx = None
 
+    Parameters:
+    - lines: list of lines from the file
+    - func_name: name of the function to modify
+    - action: one of ["insert before", "insert after", "delete", "replace"]
+    - code: new code to insert or replace (may be None for delete)
+
+    Returns:
+    - Updated list of lines after applying the action.
+    """
+    # Regular expression to match the function definition
+    func_def_pattern = re.compile(r'^def\s+' + re.escape(func_name) + r'\s*\(')
+
+    start_idx = None
+    end_idx = None
+    decorator_start = None
+
+    # Step 1: Find the function definition line, accounting for decorators
     for i, line in enumerate(lines):
-        if line.strip().startswith(pattern):
+        if func_def_pattern.match(line.strip()):
             start_idx = i
+            # Check for decorators above the function
+            j = i - 1
+            while j >= 0 and lines[j].strip().startswith('@'):
+                decorator_start = j
+                j -= 1
+            if decorator_start is not None:
+                start_idx = decorator_start
             break
 
     if start_idx is None:
-        print(f"[WARNING] Could not find function {func_name} in Python file. No changes applied.")
+        print(f"[WARNING] Could not find function '{func_name}' in Python file. No changes applied.")
         return lines
 
+    # Determine the indentation level of the function
     func_indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
-    func_end_idx = start_idx
 
+    # Step 2: Find the end of the function by tracking indentation
     for j in range(start_idx + 1, len(lines)):
-        if lines[j].strip() == "" or len(lines[j]) - len(lines[j].lstrip()) <= func_indent:
-            func_end_idx = j - 1
+        stripped_line = lines[j].strip()
+        if not stripped_line:
+            continue  # Skip empty lines
+        current_indent = len(lines[j]) - len(lines[j].lstrip())
+        if current_indent <= func_indent and not stripped_line.startswith('@'):
+            end_idx = j - 1
             break
+    else:
+        end_idx = len(lines) - 1  # Function goes till the end of the file
 
+    # If end_idx was not set in the loop, set it to the last line
+    if end_idx is None:
+        end_idx = len(lines) - 1
+
+    # Step 3: Apply the specified action
     if action == "insert before":
         if code:
             new_code_lines = code.splitlines(True)
-            lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
-        return lines
-
-    if action == "insert after":
+            insertion_idx = decorator_start if decorator_start is not None else start_idx
+            lines = lines[:insertion_idx] + new_code_lines + lines[insertion_idx:]
+    elif action == "insert after":
         if code:
             new_code_lines = code.splitlines(True)
-            lines = lines[:func_end_idx + 1] + new_code_lines + lines[func_end_idx + 1:]
-        return lines
-
-    if action == "delete":
-        del lines[start_idx:func_end_idx + 1]
-        return lines
-
-    if action == "replace":
+            lines = lines[:end_idx + 1] + new_code_lines + lines[end_idx + 1:]
+    elif action == "delete":
+        del lines[start_idx:end_idx + 1]
+    elif action == "replace":
         if code:
             new_code_lines = code.splitlines(True)
-            lines = lines[:start_idx] + new_code_lines + lines[func_end_idx + 1:]
-        return lines
+            lines = lines[:start_idx] + new_code_lines + lines[end_idx + 1:]
+    else:
+        print(f"[WARNING] Unknown action '{action}' for function '{func_name}' in Python file. No changes applied.")
 
-    print(f"[WARNING] Unknown action '{action}' for {func_name} in Python file. No changes applied.")
     return lines
+
 
 def apply_brace_delimited_function_change(lines, func_name, action, code):
     """

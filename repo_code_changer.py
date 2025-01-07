@@ -328,91 +328,130 @@ def process_repository(repo_path: str,
 
     return final_output  # Return the text for clipboard use
 
-# --------------------------------------------------------------------
-# Naive function-level changes
-def apply_function_level_change(lines, func_name, action, code):
+def apply_function_level_change(lines, func_name, action, code, file_extension):
     """
-    lines       : list of lines from the file
-    func_name   : e.g. 'resetQuizState'
-    action      : one of [insert before, insert after, delete, replace]
-    code        : string (new code) for insert/replace. may be None if deleting.
+    Dispatches to the appropriate function-level change handler based on the file type.
 
-    Returns updated list of lines after applying the action.
+    Parameters:
+    - lines: list of lines from the file
+    - func_name: name of the function to modify
+    - action: one of ["insert before", "insert after", "delete", "replace"]
+    - code: new code to insert or replace (may be None for delete)
+    - file_extension: the file extension (e.g., '.py', '.php', '.js')
+
+    Returns:
+    - Updated list of lines after applying the action.
     """
+    if file_extension == '.py':
+        return apply_python_function_change(lines, func_name, action, code)
+    elif file_extension in ['.php', '.js']:
+        return apply_brace_delimited_function_change(lines, func_name, action, code)
+    else:
+        print(f"[WARNING] Unsupported file extension '{file_extension}'. No changes applied.")
+        return lines
 
-    # We look for a line containing "function <func_name>".
-    # This is naive; it won't handle multi-line definitions or advanced syntax.
-    # You might expand or refine logic as needed.
+def apply_python_function_change(lines, func_name, action, code):
+    """
+    Handles function-level changes for Python files.
+    """
+    pattern = f"def {func_name}("
+    start_idx = None
+
+    for i, line in enumerate(lines):
+        if line.strip().startswith(pattern):
+            start_idx = i
+            break
+
+    if start_idx is None:
+        print(f"[WARNING] Could not find function {func_name} in Python file. No changes applied.")
+        return lines
+
+    func_indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
+    func_end_idx = start_idx
+
+    for j in range(start_idx + 1, len(lines)):
+        if lines[j].strip() == "" or len(lines[j]) - len(lines[j].lstrip()) <= func_indent:
+            func_end_idx = j - 1
+            break
+
+    if action == "insert before":
+        if code:
+            new_code_lines = code.splitlines(True)
+            lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
+        return lines
+
+    if action == "insert after":
+        if code:
+            new_code_lines = code.splitlines(True)
+            lines = lines[:func_end_idx + 1] + new_code_lines + lines[func_end_idx + 1:]
+        return lines
+
+    if action == "delete":
+        del lines[start_idx:func_end_idx + 1]
+        return lines
+
+    if action == "replace":
+        if code:
+            new_code_lines = code.splitlines(True)
+            lines = lines[:start_idx] + new_code_lines + lines[func_end_idx + 1:]
+        return lines
+
+    print(f"[WARNING] Unknown action '{action}' for {func_name} in Python file. No changes applied.")
+    return lines
+
+def apply_brace_delimited_function_change(lines, func_name, action, code):
+    """
+    Handles function-level changes for PHP/JavaScript files.
+    """
     pattern = f"function {func_name}("
     start_idx = None
 
-    # Find the line that starts the function
     for i, line in enumerate(lines):
         if pattern in line:
             start_idx = i
             break
 
     if start_idx is None:
-        print(f"[WARNING] Could not find function {func_name}. No changes applied.")
+        print(f"[WARNING] Could not find function {func_name} in PHP/JavaScript file. No changes applied.")
         return lines
 
-    # Insert Before
-    if action == "insert before":
-        # Just insert the code lines before the start_idx
-        if code is not None:
-            new_code_lines = code.splitlines(True)  # keep line endings
-            lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
-        else:
-            print(f"[WARNING] 'insert before' but no code provided for {func_name}.")
-        return lines
-
-    # For actions that require us to parse the function body:
-    # We'll do a naive bracket-matching approach to find the end.
     brace_depth = 0
     func_end_idx = start_idx
     found_open_brace = False
 
-    # Start from the line we found, look for { and }
     for j in range(start_idx, len(lines)):
         if '{' in lines[j]:
             brace_depth += lines[j].count('{')
             found_open_brace = True
         if '}' in lines[j] and found_open_brace:
             brace_depth -= lines[j].count('}')
-
         if found_open_brace and brace_depth <= 0:
             func_end_idx = j
             break
 
-    # Insert After
-    if action == "insert after":
-        # Place code right after func_end_idx
-        if code is not None:
+    if action == "insert before":
+        if code:
             new_code_lines = code.splitlines(True)
-            lines = lines[:func_end_idx+1] + new_code_lines + lines[func_end_idx+1:]
-        else:
-            print(f"[WARNING] 'insert after' but no code provided for {func_name}.")
+            lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
         return lines
 
-    # Delete the function
+    if action == "insert after":
+        if code:
+            new_code_lines = code.splitlines(True)
+            lines = lines[:func_end_idx + 1] + new_code_lines + lines[func_end_idx + 1:]
+        return lines
+
     if action == "delete":
-        # Remove lines from start_idx to func_end_idx inclusive
-        del lines[start_idx:func_end_idx+1]
+        del lines[start_idx:func_end_idx + 1]
         return lines
 
-    # Replace
     if action == "replace":
-        if code is None:
-            print(f"[WARNING] 'replace' action but no code provided for {func_name}.")
-            return lines
-        # Remove the old function
-        del lines[start_idx:func_end_idx+1]
-        # Insert the new code in that position
-        new_code_lines = code.splitlines(True)
-        lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
+        if code:
+            new_code_lines = code.splitlines(True)
+            lines = lines[:start_idx] + new_code_lines + lines[func_end_idx + 1:]
         return lines
 
-    print(f"[WARNING] Unknown action '{action}' for {func_name}. No changes applied.")
+    print(f"[WARNING] Unknown action '{action}' for {func_name} in PHP/JavaScript file. No changes applied.")
     return lines
 
 def apply_function_level_changes(repo_path, json_content):

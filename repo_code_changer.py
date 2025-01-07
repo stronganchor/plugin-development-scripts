@@ -264,11 +264,19 @@ def process_repository(repo_path: str,
         "When you propose code changes, output them as an array of JSON objects.\n",
         "Each object should have:\n",
         "  \"file\"         : The relative path of the file.\n",
-        "  \"functionName\" : The name of the function to affect.\n",
-        "  \"action\"       : one of [\"insert before\", \"insert after\", \"delete\", \"replace\"].\n",
-        "  \"code\"         : If you are inserting or replacing, include the code to insert/replace.\n",
+        "  \"functionName\" : (Optional) The name of the function to affect.\n",
+        "  \"lineCode\"     : (Optional) The exact code of the line to affect.\n",
+        "  \"lineNumber\"   : (Optional) The line number near which the lineCode exists (used to disambiguate if multiple matches).\n",
+        "  \"action\"       : One of [\"insert before\", \"insert after\", \"delete\", \"replace\"].\n",
+        "  \"code\"         : (If inserting or replacing) Include the code to insert or replace.\n",
         "\n",
-        "Example:\n",
+        "Each JSON object can target either an entire function or a single line within a function.\n",
+        "If targeting a function, use \"functionName\". If targeting a specific line, use \"lineCode\".\n",
+        "Optionally, include \"lineNumber\" to help locate the correct line if multiple identical lines exist.\n",
+        "You can perform actions such as inserting before/after, replacing, or deleting.\n",
+        "\n",
+        "Examples:\n",
+        "Function-level change:\n",
         "[\n",
         "  {\n",
         "    \"file\": \"assets/js/quiz.js\",\n",
@@ -283,11 +291,35 @@ def process_repository(repo_path: str,
         "  }\n",
         "]\n",
         "\n",
+        "Line-level change:\n",
+        "[\n",
+        "  {\n",
+        "    \"file\": \"assets/js/quiz.js\",\n",
+        "    \"lineCode\": \"var score = 0;\",\n",
+        "    \"action\": \"replace\",\n",
+        "    \"code\": \"var score = 10;\"\n",
+        "  },\n",
+        "  {\n",
+        "    \"file\": \"assets/js/quiz.js\",\n",
+        "    \"lineCode\": \"console.log('Quiz started');\",\n",
+        "    \"action\": \"delete\"\n",
+        "  },\n",
+        "  {\n",
+        "    \"file\": \"assets/js/quiz.js\",\n",
+        "    \"lineCode\": \"var i = 0;\",\n",
+        "    \"lineNumber\": 150,\n",
+        "    \"action\": \"insert before\",\n",
+        "    \"code\": \"console.log('Initializing counter');\"\n",
+        "  }\n",
+        "]\n",
+        "\n",
         "NOTES:\n",
-        "- \"insert before\" places the new code right above the function definition line.\n",
-        "- \"insert after\" places new code immediately after the function's final closing brace.\n",
-        "- \"delete\" removes the function entirely.\n",
-        "- \"replace\" replaces the entire function.\n",
+        "- To target a function, specify \"functionName\".\n",
+        "- To target a specific line, specify \"lineCode\".\n",
+        "- Optionally, include \"lineNumber\" to help locate the correct line if multiple identical lines exist.\n",
+        "- You can perform actions such as \"insert before\", \"insert after\", \"delete\", or \"replace\".\n",
+        "- When inserting before or after a line or function, provide the exact code you want to insert.\n",
+        "- When replacing, provide the new code that should replace the target.\n",
         "- Keep changes minimal and do not modify unrelated code.\n",
         "\n",
         "END OF INSTRUCTIONS.\n\n"
@@ -358,11 +390,11 @@ def process_repository(repo_path: str,
 
 def apply_function_level_change(lines, func_name, action, code, file_extension):
     """
-    Dispatches to the appropriate function-level change handler based on the file type.
+    Dispatches to the appropriate function-level or line-level change handler based on the file type.
 
     Parameters:
     - lines: list of lines from the file
-    - func_name: name of the function to modify
+    - func_name: name of the function to modify (optional)
     - action: one of ["insert before", "insert after", "delete", "replace"]
     - code: new code to insert or replace (may be None for delete)
     - file_extension: the file extension (e.g., '.py', '.php', '.js')
@@ -370,13 +402,71 @@ def apply_function_level_change(lines, func_name, action, code, file_extension):
     Returns:
     - Updated list of lines after applying the action.
     """
-    if file_extension == '.py':
-        return apply_python_function_change(lines, func_name, action, code)
-    elif file_extension in ['.php', '.js']:
-        return apply_brace_delimited_function_change(lines, func_name, action, code)
+    # Determine if the change is function-level or line-level
+    # If func_name is provided, it's function-level
+    # If lineCode is provided, it's line-level
+    # This function will be called appropriately based on JSON keys
+    if func_name:
+        if file_extension == '.py':
+            return apply_python_function_change(lines, func_name, action, code)
+        elif file_extension in ['.php', '.js']:
+            return apply_brace_delimited_function_change(lines, func_name, action, code)
+        else:
+            print(f"[WARNING] Unsupported file extension '{file_extension}'. No changes applied.")
+            return lines
     else:
-        print(f"[WARNING] Unsupported file extension '{file_extension}'. No changes applied.")
+        # Line-level changes
+        return apply_line_level_change(lines, action, code, line_code=code)
+
+def apply_line_level_change(lines, action, new_code, line_code=None, reference_line_number=None):
+    """
+    Handles line-level changes for any file type by searching for the line code.
+
+    Parameters:
+    - lines: list of lines from the file
+    - action: one of ["insert before", "insert after", "delete", "replace"]
+    - new_code: new code to insert or replace (may be None for delete)
+    - line_code: the exact code of the line to target
+    - reference_line_number: optional line number near which the target line exists (used for disambiguation)
+
+    Returns:
+    - Updated list of lines after applying the action.
+    """
+    if not line_code:
+        print(f"[WARNING] Line code not provided for line-level change.")
         return lines
+
+    # Find all matching lines
+    matching_indices = [i for i, line in enumerate(lines) if line.strip() == line_code.strip()]
+    if not matching_indices:
+        print(f"[WARNING] No lines matching code '{line_code}' found. No changes applied.")
+        return lines
+
+    # If multiple matches and reference_line_number is provided, find the closest
+    if len(matching_indices) > 1 and reference_line_number:
+        reference_idx = reference_line_number - 1  # Convert to 0-based index
+        closest_idx = min(matching_indices, key=lambda x: abs(x - reference_idx))
+    else:
+        closest_idx = matching_indices[0]
+
+    if action == "insert before":
+        if new_code:
+            new_code_lines = new_code.splitlines(True)
+            lines = lines[:closest_idx] + new_code_lines + lines[closest_idx:]
+    elif action == "insert after":
+        if new_code:
+            new_code_lines = new_code.splitlines(True)
+            lines = lines[:closest_idx + 1] + new_code_lines + lines[closest_idx + 1:]
+    elif action == "delete":
+        del lines[closest_idx]
+    elif action == "replace":
+        if new_code:
+            new_code_lines = new_code.splitlines(True)
+            lines = lines[:closest_idx] + new_code_lines + lines[closest_idx + 1:]
+    else:
+        print(f"[WARNING] Unknown action '{action}' for line-level change. No changes applied.")
+
+    return lines
 
 def apply_python_function_change(lines, func_name, action, code):
     """
@@ -590,12 +680,14 @@ def apply_brace_delimited_function_change(lines, func_name, action, code):
 
 def apply_function_level_changes(repo_path, json_content):
     """
-    Expect JSON array. Each object:
+    Expect JSON array. Each object can target either a function or a specific line.
       {
         "file": "relative/path/to/file.js",
-        "functionName": "resetQuizState",
+        "functionName": "resetQuizState",       # Optional
+        "lineCode": "var i = 0;",               # Optional
+        "lineNumber": 150,                      # Optional (used only if multiple matches)
         "action": "insert before|insert after|delete|replace",
-        "code": "... code ..."
+        "code": "... code ..."                  # Optional for delete
       }
     """
     try:
@@ -611,13 +703,15 @@ def apply_function_level_changes(repo_path, json_content):
     for change in changes:
         if not isinstance(change, dict):
             continue
-        required_keys = ["file", "functionName", "action"]
+        required_keys = ["file", "action"]
         if not all(k in change for k in required_keys):
             print(f"[WARNING] Incomplete change object: {change}")
             continue
 
         file_rel = change["file"]
-        func_name = change["functionName"]
+        func_name = change.get("functionName", None)
+        line_code = change.get("lineCode", None)
+        line_number = change.get("lineNumber", None)  # Optional
         action = change["action"].lower()
         code = change.get("code", None)
 
@@ -638,13 +732,19 @@ def apply_function_level_changes(repo_path, json_content):
             continue
 
         # Apply the change
-        updated_lines = apply_function_level_change(lines, func_name, action, code, file_extension)
+        if func_name:
+            updated_lines = apply_function_level_change(lines, func_name, action, code, file_extension)
+        elif line_code:
+            updated_lines = apply_line_level_change(lines, action, code, line_code=line_code, reference_line_number=line_number)
+        else:
+            print(f"[WARNING] Neither 'functionName' nor 'lineCode' provided for change: {change}")
+            continue
 
         # Write updated lines
         try:
             with open(target_file, 'w', encoding='utf-8') as f:
                 f.writelines(updated_lines)
-            print(f"[INFO] Function-level changes applied to {file_rel}")
+            print(f"[INFO] Changes applied to {file_rel}")
         except Exception as e:
             print(f"[ERROR] Could not write file '{target_file}' - {e}")
 
@@ -751,7 +851,7 @@ def do_apply_changes():
     Called when user clicks 'Apply Changes'.
     1. Get the folder path for applying changes.
     2. Parse JSON from text field.
-    3. Apply changes at a *function level*.
+    3. Apply changes at a *function or line level*.
     """
     repo_path = apply_path_var.get().strip()
     if not repo_path:
@@ -770,7 +870,7 @@ def do_apply_changes():
         return
 
     apply_function_level_changes(repo_path, json_input)
-    messagebox.showinfo("Done", "Function-level code changes have been applied.")
+    messagebox.showinfo("Done", "Code changes have been applied.")
 
 # --------------------------------------------------------------------
 # Main UI Setup
@@ -810,7 +910,7 @@ send_btn = tk.Button(root, text="Send to OpenAI", command=send_to_openai)
 send_btn.pack(pady=10)
 
 # Frame for "Apply Changes"
-frame_apply = tk.LabelFrame(root, text="Apply JSON Changes (Function-Level)")
+frame_apply = tk.LabelFrame(root, text="Apply JSON Changes (Function or Line-Level)")
 frame_apply.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
 apply_path_var = tk.StringVar(value=load_last_path(LAST_APPLY_PATH_FILE))

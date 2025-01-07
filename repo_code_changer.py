@@ -34,7 +34,7 @@ def get_available_models():
         return models
     except Exception as e:
         print(f"[ERROR] Could not fetch models: {e}")
-        return ["gpt-chatgpt-4o-latest"]  # Fallback model
+        return ["o1-mini", "o1-preview", "4o", "4o-mini"]  # Fallback models
         
 def send_to_openai():
     raw_path = combine_path_var.get().strip()

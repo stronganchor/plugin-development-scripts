@@ -25,16 +25,34 @@ if not api_key:
     exit(1)
 
 openai.api_key = api_key
+client = OpenAI()
 
-# Function to send data to OpenAI
+# Function to get available models with priority models at the top
 def get_available_models():
+    priority_models = ["o1-mini", "o1-preview", "gpt-4o", "gpt-4o-mini"]  # Define your priority models
+
     try:
-        response = openai.Model.list()
-        models = [model['id'] for model in response['data']]
+        # Fetch the list of available models
+        response = client.models.list()
+
+        # Extract model IDs by iterating directly over the response
+        fetched_models = [model.id for model in response]
+
+        # Identify which priority models are available
+        available_priority_models = [model for model in priority_models if model in fetched_models]
+
+        # Exclude priority models from fetched_models to avoid duplication
+        other_models = [model for model in fetched_models if model not in priority_models]
+
+        # Combine: priority models first, then the rest
+        models = available_priority_models + other_models
+
         return models
+
     except Exception as e:
         print(f"[ERROR] Could not fetch models: {e}")
-        return ["o1-mini", "o1-preview", "4o", "4o-mini"]  # Fallback models
+        # Return priority models as fallback
+        return priority_models
         
 def send_to_openai():
     raw_path = combine_path_var.get().strip()
@@ -86,7 +104,6 @@ def send_to_openai():
 
     # Call OpenAI API
     try:
-        client = OpenAI()
         selected_model = selected_model_var.get()
 
         response = client.chat.completions.create(

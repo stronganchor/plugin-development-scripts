@@ -57,11 +57,19 @@ def get_available_models():
         print(f"[ERROR] Could not fetch models: {e}")
         # Return priority models as fallback
         return priority_models
-        
-# Retrieves and prioritizes available OpenAI models for selection.
-"""
-Sends the combined repository code and user prompt to OpenAI and handles the response.
-"""
+
+# ------------------------- NEW SYSTEM MESSAGE -------------------------
+# This will instruct the model to produce valid JSON only.
+SYSTEM_MESSAGE_FOR_JSON = {
+    "role": "system",
+    "content": (
+        "You are a helpful assistant. You must respond with valid JSON only, "
+        "and do not include any extra text. If refusing for safety reasons, respond with a valid JSON object "
+        'containing `"refusal"`.'
+    )
+}
+# ---------------------------------------------------------------------
+
 def send_to_openai():
     raw_path = combine_path_var.get().strip()
     if not raw_path:
@@ -104,8 +112,9 @@ def send_to_openai():
         messagebox.showwarning("Warning", "No prompt provided for OpenAI.")
         return
 
-    # Prepare payload for OpenAI API
+    # Prepare messages for OpenAI API - system message + user message
     messages = [
+        SYSTEM_MESSAGE_FOR_JSON,  # <-- Always instruct model to output valid JSON
         {
             "role": "user",
             "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"
@@ -115,71 +124,29 @@ def send_to_openai():
     # Call OpenAI API
     try:
         selected_model = selected_model_var.get()
-
         response = client.chat.completions.create(
             messages=messages,
             model=selected_model,
+            # ------------------ EXPLICITLY REQUEST JSON MODE ------------------
+            response_format={"type": "json_object"},
+            # ------------------------------------------------------------------
         )
+
         response_content = response.choices[0].message.content
 
-        # Extract JSON array from the response_content
-        start = response_content.find('[')
-        end = response_content.rfind(']')
-
-        if start != -1 and end != -1 and start < end:
-           json_only = response_content[start:end+1]
-           try:
-               # Validate JSON
-               json_object = json.loads(json_only)
-               # If valid, format it with indentation for readability
-               formatted_json = json.dumps(json_object, indent=2)
-               response_content = formatted_json
-           except json.JSONDecodeError as e:
-               messagebox.showerror("JSON Error", f"Failed to parse JSON from response:\n{e}")
-        else:
-           messagebox.showerror("Format Error", "The response does not contain a valid JSON array.")
+        # In JSON mode, .content should already be valid JSON. We can attempt to load it:
+        try:
+            json_object = json.loads(response_content)
+            formatted_json = json.dumps(json_object, indent=2)
+            response_content = formatted_json
+        except json.JSONDecodeError as e:
+            messagebox.showerror("JSON Error", f"Failed to parse JSON from response:\n{e}")
 
         text_json.delete("1.0", tk.END)
         text_json.insert(tk.END, response_content)
         messagebox.showinfo("Success", "Response received from OpenAI!")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to communicate with OpenAI: {e}")
-
-# Sends the combined code and user prompt to OpenAI and handles the response.
-# --------------------------------------------------------------------
-# Function to fetch a zip file with retry logic
-"""
-Attempts to download a ZIP file from the given URL with retries.
-Returns the raw bytes if successful, otherwise None.
-"""
-def fetch_zip(url, max_retries=3, timeout=30):
-    """
-    Attempt to GET a zip file from the specified URL, up to max_retries times.
-    Returns the raw bytes of the zip content if successful, or None on failure.
-    """
-    for attempt in range(max_retries):
-        try:
-            print(f"[DEBUG] Attempt {attempt+1} - GET {url}")
-            r = requests.get(url, timeout=timeout)
-            print(f"[DEBUG] Status code: {r.status_code}")
-            print(f"[DEBUG] Response size (bytes): {len(r.content)}")
-
-            if r.status_code == 200:
-                content_type = r.headers.get('content-type', '')
-                print(f"[DEBUG] Content-Type: {content_type}")
-
-                # Basic check if it's likely a zip
-                if 'zip' in content_type.lower() or r.content.startswith(b'PK\x03\x04'):
-                    return r.content
-                else:
-                    print("[DEBUG] Response not recognized as a valid zip file. Retrying...\n")
-            else:
-                print(f"[DEBUG] Non-200 status code ({r.status_code}). Retrying...\n")
-
-        except Exception as e:
-            print(f"[DEBUG] Attempt {attempt+1} got exception: {e}. Retrying...\n")
-
-    return None  # All attempts failed
 
 # Downloads a ZIP file from the specified URL with retry logic.
 """
@@ -188,14 +155,9 @@ Tries 'main' and 'master' branches by default.
 Returns the path to the extracted repository.
 """
 def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> str:
-    """
-    Downloads the GitHub repo zip (from 'main' or 'master') into extraction_dir and returns the path.
-    Leaves the extracted files in place for inspection.
-    """
     if not repo_url.endswith('/'):
         repo_url += '/'
 
-    # Try 'main' first, then 'master'
     branches_to_try = ["main", "master"]
     zip_content = None
 
@@ -210,19 +172,14 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
         raise Exception(f"[ERROR] Failed to download repository from {repo_url} "
                         f"(tried branches {branches_to_try}).")
 
-    # Ensure the extraction directory exists
     if not os.path.exists(extraction_dir):
         os.makedirs(extraction_dir)
 
-    # Extract the zip to extraction_dir
     with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
         if not z.namelist():
             raise Exception("[ERROR] Zip archive is empty or invalid.")
-
         print("[DEBUG] Zip file contents:", z.namelist())
         z.extractall(extraction_dir)
-
-        # Typically the first folder is something like 'repo-main/' or 'repo-master/'
         extracted_name = z.namelist()[0].split('/')[0]
         repo_path = os.path.join(extraction_dir, extracted_name)
 
@@ -230,14 +187,32 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
     return repo_path
 
 """
-Extracts plugin information such as name and version from top-level PHP files in the repository.
-Returns a tuple of (plugin_name, plugin_version).
+Attempts to download a ZIP file from the given URL with retries.
+Returns the raw bytes if successful, otherwise None.
 """
+def fetch_zip(url, max_retries=3, timeout=30):
+    for attempt in range(max_retries):
+        try:
+            print(f"[DEBUG] Attempt {attempt+1} - GET {url}")
+            r = requests.get(url, timeout=timeout)
+            print(f"[DEBUG] Status code: {r.status_code}")
+            print(f"[DEBUG] Response size (bytes): {len(r.content)}")
+
+            if r.status_code == 200:
+                content_type = r.headers.get('content-type', '')
+                print(f"[DEBUG] Content-Type: {content_type}")
+                if 'zip' in content_type.lower() or r.content.startswith(b'PK\x03\x04'):
+                    return r.content
+                else:
+                    print("[DEBUG] Response not recognized as a valid zip file. Retrying...\n")
+            else:
+                print(f"[DEBUG] Non-200 status code ({r.status_code}). Retrying...\n")
+        except Exception as e:
+            print(f"[DEBUG] Attempt {attempt+1} got exception: {e}. Retrying...\n")
+
+    return None
+
 def get_plugin_info(repo_path: str):
-    """
-    Scans top-level .php files in the repo for Plugin Name and Version lines.
-    Returns (plugin_name, plugin_version). If either is missing, returns None.
-    """
     plugin_name = None
     plugin_version = None
 
@@ -252,7 +227,6 @@ def get_plugin_info(repo_path: str):
             try:
                 with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                     contents = f.read()
-                # Look for "Plugin Name:" and "Version:" lines
                 for line in contents.splitlines():
                     if "Plugin Name:" in line:
                         name_part = line.split("Plugin Name:", 1)[1].strip()
@@ -260,14 +234,12 @@ def get_plugin_info(repo_path: str):
                         if name_part:
                             plugin_name = name_part
                             print(f"[DEBUG] Detected plugin name: {plugin_name}")
-
                     if "Version:" in line:
                         version_part = line.split("Version:", 1)[1].strip()
                         version_part = version_part.strip("*/ ")
                         if version_part:
                             plugin_version = version_part
                             print(f"[DEBUG] Detected plugin version: {plugin_version}")
-
                 if plugin_name or plugin_version:
                     break
             except Exception as e:
@@ -275,8 +247,6 @@ def get_plugin_info(repo_path: str):
 
     return plugin_name, plugin_version
 
-# --------------------------------------------------------------------
-# Create the combined code text (no line numbers) + updated AI instructions.
 """
 Processes the repository by combining code from various files into a single text file.
 Excludes specified directories and adds custom AI instructions.
@@ -289,18 +259,10 @@ def process_repository(repo_path: str,
                        chars_per_token: int,
                        plugin_name: str = None,
                        plugin_version: str = None):
-    """
-    Walks through repo_path, reads text files, and writes them to one .txt file in output_dir.
-    Skips directories in skip_dirs. If plugin_name is found, that replaces 'all_code'.
-    If plugin_version is found, that is appended (e.g. "v{plugin_version}").
-    Returns the combined code text as a string.
-    """
-
     combined_contents = []
     included_files = []
     total_chars = 0
 
-    # Updated custom AI instructions
     ai_instructions = [
         "IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:\n",
         "You must respond **only** with a JSON array as specified below. **Do not include any other text or explanations**.\n",
@@ -368,7 +330,6 @@ def process_repository(repo_path: str,
         "END OF INSTRUCTIONS.\n\n"
     ]
 
-    # Gather code from all files
     for root, dirs, files in os.walk(repo_path, topdown=True):
         print(f"[DEBUG] Scanning '{root}' with {len(dirs)} subdirectories and {len(files)} files BEFORE skipping.")
         dirs[:] = [d for d in dirs if d not in skip_dirs]
@@ -396,7 +357,6 @@ def process_repository(repo_path: str,
     print(f"[DEBUG] Total characters read: {total_chars}")
     print(f"[DEBUG] Approx tokens: {approx_tokens}")
 
-    # Build introduction block
     included_files.sort()
     intro_lines = [
         "This is the code from the provided repository.\n\n",
@@ -412,16 +372,13 @@ def process_repository(repo_path: str,
 
     intro_block = "".join(intro_lines)
 
-    # Decide on base filename
     base_name = plugin_name if plugin_name else "all_code"
     if plugin_version:
         base_name += f" v{plugin_version}"
     output_filename = os.path.join(output_dir, f"{base_name}.txt")
 
-    # Combine code + ai_instructions
     final_output = intro_block + "".join(combined_contents) + "".join(ai_instructions)
 
-    # Write out
     with open(output_filename, "w", encoding="utf-8") as outfile:
         outfile.write(final_output)
 
@@ -429,31 +386,9 @@ def process_repository(repo_path: str,
     print(f"[DEBUG] Wrote {output_filename} with {total_chars_in_file} characters "
           f"(approx {total_chars_in_file // chars_per_token} tokens).")
 
-    return final_output  # Return the text for sending to OpenAI
+    return final_output
 
-# Combines all relevant code files into a single text file for processing.
-"""
-Applies function-level or line-level changes to a file based on the specified action.
-Supports Python, PHP, and JavaScript file types.
-"""
 def apply_function_level_change(lines, func_name, action, code, file_extension):
-    """
-    Dispatches to the appropriate function-level or line-level change handler based on the file type.
-
-    Parameters:
-    - lines: list of lines from the file
-    - func_name: name of the function to modify (optional)
-    - action: one of ["insert before", "insert after", "delete", "replace"]
-    - code: new code to insert or replace (may be None for delete)
-    - file_extension: the file extension (e.g., '.py', '.php', '.js')
-
-    Returns:
-    - Updated list of lines after applying the action.
-    """
-    # Determine if the change is function-level or line-level
-    # If func_name is provided, it's function-level
-    # If lineCode is provided, it's line-level
-    # This function will be called appropriately based on JSON keys
     if func_name:
         if file_extension == '.py':
             return apply_python_function_change(lines, func_name, action, code)
@@ -463,40 +398,20 @@ def apply_function_level_change(lines, func_name, action, code, file_extension):
             print(f"[WARNING] Unsupported file extension '{file_extension}'. No changes applied.")
             return lines
     else:
-        # Line-level changes
         return apply_line_level_change(lines, action, code, line_code=code)
 
-# Applies function-level or line-level changes based on the provided parameters.
-"""
-Handles line-level changes such as inserting, deleting, or replacing specific lines in a file.
-"""
 def apply_line_level_change(lines, action, new_code, line_code=None, reference_line_number=None):
-    """
-    Handles line-level changes for any file type by searching for the line code.
-
-    Parameters:
-    - lines: list of lines from the file
-    - action: one of ["insert before", "insert after", "delete", "replace"]
-    - new_code: new code to insert or replace (may be None for delete)
-    - line_code: the exact code of the line to target
-    - reference_line_number: optional line number near which the target line exists (used for disambiguation)
-
-    Returns:
-    - Updated list of lines after applying the action.
-    """
     if not line_code:
         print(f"[WARNING] Line code not provided for line-level change.")
         return lines
 
-    # Find all matching lines
     matching_indices = [i for i, line in enumerate(lines) if line.strip() == line_code.strip()]
     if not matching_indices:
         print(f"[WARNING] No lines matching code '{line_code}' found. No changes applied.")
         return lines
 
-    # If multiple matches and reference_line_number is provided, find the closest
     if len(matching_indices) > 1 and reference_line_number:
-        reference_idx = reference_line_number - 1  # Convert to 0-based index
+        reference_idx = reference_line_number - 1
         closest_idx = min(matching_indices, key=lambda x: abs(x - reference_idx))
     else:
         closest_idx = matching_indices[0]
@@ -520,34 +435,15 @@ def apply_line_level_change(lines, action, new_code, line_code=None, reference_l
 
     return lines
 
-"""
-Applies function-level changes to Python files by modifying function definitions based on the action.
-"""
 def apply_python_function_change(lines, func_name, action, code):
-    """
-    Handles function-level changes for Python files.
-
-    Parameters:
-    - lines: list of lines from the file
-    - func_name: name of the function to modify
-    - action: one of ["insert before", "insert after", "delete", "replace"]
-    - code: new code to insert or replace (may be None for delete)
-
-    Returns:
-    - Updated list of lines after applying the action.
-    """
-    # Regular expression to match the function definition
     func_def_pattern = re.compile(r'^def\s+' + re.escape(func_name) + r'\s*\(')
-
     start_idx = None
     end_idx = None
     decorator_start = None
 
-    # Step 1: Find the function definition line, accounting for decorators
     for i, line in enumerate(lines):
         if func_def_pattern.match(line.strip()):
             start_idx = i
-            # Check for decorators above the function
             j = i - 1
             while j >= 0 and lines[j].strip().startswith('@'):
                 decorator_start = j
@@ -560,26 +456,22 @@ def apply_python_function_change(lines, func_name, action, code):
         print(f"[WARNING] Could not find function '{func_name}' in Python file. No changes applied.")
         return lines
 
-    # Determine the indentation level of the function
     func_indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
 
-    # Step 2: Find the end of the function by tracking indentation
     for j in range(start_idx + 1, len(lines)):
         stripped_line = lines[j].strip()
         if not stripped_line:
-            continue  # Skip empty lines
+            continue
         current_indent = len(lines[j]) - len(lines[j].lstrip())
         if current_indent <= func_indent and not stripped_line.startswith('@'):
             end_idx = j - 1
             break
     else:
-        end_idx = len(lines) - 1  # Function goes till the end of the file
+        end_idx = len(lines) - 1
 
-    # If end_idx was not set in the loop, set it to the last line
     if end_idx is None:
         end_idx = len(lines) - 1
 
-    # Step 3: Apply the specified action
     if action == "insert before":
         if code:
             new_code_lines = code.splitlines(True)
@@ -600,27 +492,10 @@ def apply_python_function_change(lines, func_name, action, code):
 
     return lines
 
-
-"""
-Applies function-level changes to PHP or JavaScript files by modifying functions enclosed in braces.
-"""
 def apply_brace_delimited_function_change(lines, func_name, action, code):
-    """
-    lines       : list of lines from the file
-    func_name   : e.g. 'resetQuizState'
-    action      : one of [insert before, insert after, delete, replace]
-    code        : string (new code) for insert/replace. may be None if deleting.
-
-    Returns updated list of lines after applying the action.
-    """
-
-    # We look for a line containing "function <func_name>".
-    # This is naive; it won't handle multi-line definitions or advanced syntax.
-    # You might expand or refine logic as needed.
     pattern = f"function {func_name}("
     start_idx = None
 
-    # Find the line that starts the function
     for i, line in enumerate(lines):
         if pattern in line:
             start_idx = i
@@ -630,37 +505,29 @@ def apply_brace_delimited_function_change(lines, func_name, action, code):
         print(f"[WARNING] Could not find function {func_name}. No changes applied.")
         return lines
 
-    # Insert Before
     if action == "insert before":
-        # Just insert the code lines before the start_idx
         if code is not None:
-            new_code_lines = code.splitlines(True)  # keep line endings
+            new_code_lines = code.splitlines(True)
             lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
         else:
             print(f"[WARNING] 'insert before' but no code provided for {func_name}.")
         return lines
 
-    # For actions that require us to parse the function body:
-    # We'll do a naive bracket-matching approach to find the end.
     brace_depth = 0
     func_end_idx = start_idx
     found_open_brace = False
 
-    # Start from the line we found, look for { and }
     for j in range(start_idx, len(lines)):
         if '{' in lines[j]:
             brace_depth += lines[j].count('{')
             found_open_brace = True
         if '}' in lines[j] and found_open_brace:
             brace_depth -= lines[j].count('}')
-
         if found_open_brace and brace_depth == 0:
             func_end_idx = j
             break
 
-    # Insert After
     if action == "insert after":
-        # Place code right after func_end_idx
         if code is not None:
             new_code_lines = code.splitlines(True)
             lines = lines[:func_end_idx+1] + new_code_lines + lines[func_end_idx+1:]
@@ -668,89 +535,23 @@ def apply_brace_delimited_function_change(lines, func_name, action, code):
             print(f"[WARNING] 'insert after' but no code provided for {func_name}.")
         return lines
 
-    # Delete the function
     if action == "delete":
-        # Remove lines from start_idx to func_end_idx inclusive
         del lines[start_idx:func_end_idx+1]
         return lines
 
-    # Replace
     if action == "replace":
         if code is None:
             print(f"[WARNING] 'replace' action but no code provided for {func_name}.")
             return lines
-        # Remove the old function
         del lines[start_idx:func_end_idx+1]
-        # Insert the new code in that position
         new_code_lines = code.splitlines(True)
         lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
         return lines
 
     print(f"[WARNING] Unknown action '{action}' for {func_name}. No changes applied.")
     return lines
-    for i, line in enumerate(lines):
-        if pattern in line:
-            start_idx = i
-            break
 
-    if start_idx is None:
-        print(f"[WARNING] Could not find function {func_name} in PHP/JavaScript file. No changes applied.")
-        return lines
-
-    brace_depth = 0
-    func_end_idx = start_idx
-    found_open_brace = False
-
-    for j in range(start_idx, len(lines)):
-        if '{' in lines[j]:
-            brace_depth += lines[j].count('{')
-            found_open_brace = True
-        if '}' in lines[j] and found_open_brace:
-            brace_depth -= lines[j].count('}')
-        if found_open_brace and brace_depth <= 0:
-            func_end_idx = j
-            break
-
-    if action == "insert before":
-        if code:
-            new_code_lines = code.splitlines(True)
-            lines = lines[:start_idx] + new_code_lines + lines[start_idx:]
-        return lines
-
-    if action == "insert after":
-        if code:
-            new_code_lines = code.splitlines(True)
-            lines = lines[:func_end_idx + 1] + new_code_lines + lines[func_end_idx + 1:]
-        return lines
-
-    if action == "delete":
-        del lines[start_idx:func_end_idx + 1]
-        return lines
-
-    if action == "replace":
-        if code:
-            new_code_lines = code.splitlines(True)
-            lines = lines[:start_idx] + new_code_lines + lines[func_end_idx + 1:]
-        return lines
-
-    print(f"[WARNING] Unknown action '{action}' for {func_name} in PHP/JavaScript file. No changes applied.")
-    return lines
-
-"""
-Parses JSON instructions and applies the specified function-level or line-level changes to the repository files.
-"""
 def apply_all_changes(repo_path, json_content):
-    """
-    Expect JSON array. Each object can target either a function or a specific line.
-      {
-        "file": "relative/path/to/file.js",
-        "functionName": "resetQuizState",       # Optional
-        "lineCode": "var i = 0;",               # Optional
-        "lineNumber": 150,                      # Optional (used only if multiple matches)
-        "action": "insert before|insert after|delete|replace",
-        "code": "... code ..."                  # Optional for delete
-      }
-    """
     try:
         changes = json.loads(json_content)
     except json.JSONDecodeError as e:
@@ -772,13 +573,12 @@ def apply_all_changes(repo_path, json_content):
         file_rel = change["file"]
         func_name = change.get("functionName", None)
         line_code = change.get("lineCode", None)
-        line_number = change.get("lineNumber", None)  # Optional
+        line_number = change.get("lineNumber", None)
         action = change["action"].lower()
         code = change.get("code", None)
         if code and not code.endswith('\n'):
             code = code + '\n'
 
-        # Validate
         target_file = os.path.join(repo_path, file_rel)
         file_extension = os.path.splitext(file_rel)[1]
 
@@ -786,7 +586,6 @@ def apply_all_changes(repo_path, json_content):
             print(f"[WARNING] File does not exist: {target_file}")
             continue
 
-        # Read file lines
         try:
             with open(target_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
@@ -794,7 +593,6 @@ def apply_all_changes(repo_path, json_content):
             print(f"[ERROR] Could not read file '{target_file}' - {e}")
             continue
 
-        # Apply the change
         if func_name:
             updated_lines = apply_function_level_change(lines, func_name, action, code, file_extension)
         elif line_code:
@@ -803,7 +601,6 @@ def apply_all_changes(repo_path, json_content):
             print(f"[WARNING] Neither 'functionName' nor 'lineCode' provided for change: {change}")
             continue
 
-        # Write updated lines
         try:
             with open(target_file, 'w', encoding='utf-8') as f:
                 f.writelines(updated_lines)
@@ -811,12 +608,6 @@ def apply_all_changes(repo_path, json_content):
         except Exception as e:
             print(f"[ERROR] Could not write file '{target_file}' - {e}")
 
-# --------------------------------------------------------------------
-# Utility for saving/loading last paths
-"""
-Loads the last used path from a file if it exists.
-Returns the path as a string or an empty string if the file doesn't exist.
-"""
 def load_last_path(filename):
     if os.path.exists(filename):
         try:
@@ -826,9 +617,6 @@ def load_last_path(filename):
             pass
     return ""
 
-"""
-Saves the provided path to a specified file for future sessions.
-"""
 def save_last_path(filename, path):
     try:
         with open(filename, 'w', encoding='utf-8') as f:
@@ -836,77 +624,46 @@ def save_last_path(filename, path):
     except:
         pass
 
-# --------------------------------------------------------------------
-# TKINTER UI
-
-"""
-Opens a dialog for the user to select a directory for combining code.
-Sets the selected path in the combine_path_var variable.
-"""
 def browse_folder_for_combine():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
         combine_path_var.set(folder_selected)
 
-"""
-Opens a dialog for the user to select a directory for applying changes.
-Sets the selected path in the apply_path_var variable.
-"""
 def browse_folder_for_apply():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
         apply_path_var.set(folder_selected)
 
-"""
-Handles the download and combination of repository code.
-Determines if the input is a URL or local path, downloads if necessary, and combines the code.
-Copies the combined code to the clipboard.
-"""
 def do_download_and_combine():
-    """
-    Called when user clicks 'Download & Combine':
-    1. Determine if user-specified string is a URL or local path.
-    2. If URL, download + extract. If path, use directly.
-    3. Gather code, produce a single text file, copy the text to clipboard.
-    """
     raw_input = combine_path_var.get().strip()
     if not raw_input:
         messagebox.showerror("Error", "No URL/path provided for combining code.")
         return
 
-    # Save the path for future sessions
     save_last_path(LAST_COMBINE_PATH_FILE, raw_input)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # We'll create an 'output' folder specifically for the combined code
     output_dir = os.path.join(script_dir, "combined_output")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # Decide local extraction path
     extracted_dir = os.path.join(output_dir, "extracted")
 
-    # If it looks like an HTTP/HTTPS URL, try to download
     if raw_input.startswith("http://") or raw_input.startswith("https://"):
         try:
-            # Optionally remove or reuse extracted_dir as needed
             repo_path = download_github_repo(raw_input, extracted_dir)
         except Exception as e:
             messagebox.showerror("Download Error", f"Failed to download and extract the repository:\n{e}")
             return
     else:
-        # It's presumably a local path
         if os.path.exists(raw_input):
             repo_path = raw_input
         else:
             messagebox.showerror("Path Error", f"The provided path does not exist:\n{raw_input}")
             return
 
-    # Detect plugin name/version
     plugin_name, plugin_version = get_plugin_info(repo_path)
 
-    # Produce combined code
     max_tokens = 128000
     chars_per_token = 4
     max_chars = max_tokens * chars_per_token
@@ -921,25 +678,14 @@ def do_download_and_combine():
         plugin_version=plugin_version
     )
 
-    # Copy to clipboard
     root.clipboard_clear()
     root.clipboard_append(final_output)
-    root.update()  # let the clipboard actions take effect
+    root.update()
 
     messagebox.showinfo("Success", "Code combined and copied to clipboard!\n"
                                    "Paste into ChatGPT for review.")
 
-"""
-Applies JSON-based changes to the repository code.
-Parses the JSON input and modifies the code accordingly.
-"""
 def do_apply_all_changes():
-    """
-    Called when user clicks 'Apply Changes'.
-    1. Get the folder path for applying changes.
-    2. Parse JSON from text field.
-    3. Apply changes at a *function or line level*.
-    """
     repo_path = apply_path_var.get().strip()
     if not repo_path:
         messagebox.showerror("Error", "No folder path provided for applying changes.")
@@ -948,7 +694,6 @@ def do_apply_all_changes():
         messagebox.showerror("Error", f"The specified path is not a directory:\n{repo_path}")
         return
 
-    # Save the path
     save_last_path(LAST_APPLY_PATH_FILE, repo_path)
 
     json_input = text_json.get("1.0", tk.END).strip()
@@ -959,12 +704,9 @@ def do_apply_all_changes():
     apply_all_changes(repo_path, json_input)
     messagebox.showinfo("Done", "Code changes have been applied.")
 
-# --------------------------------------------------------------------
-# Main UI Setup
 root = tk.Tk()
 root.title("Repo Code Changer")
 
-# Frame for "Download & Combine"
 frame_combine = tk.LabelFrame(root, text="Download & Combine Code")
 frame_combine.pack(fill=tk.X, padx=10, pady=5)
 
@@ -978,25 +720,21 @@ browse_btn1.pack(side=tk.LEFT, padx=5)
 combine_btn = tk.Button(frame_combine, text="Download & Combine", command=do_download_and_combine)
 combine_btn.pack(side=tk.LEFT, padx=5)
 
-# Frame for "User Prompt"
 frame_prompt = tk.LabelFrame(root, text="User Prompt")
 frame_prompt.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
 user_prompt_var = tk.Text(frame_prompt, wrap=tk.WORD, height=5)
 user_prompt_var.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-# Add OpenAI model selection dropdown
 models = get_available_models()
 selected_model_var = tk.StringVar(value=models[0] if models else "gpt-3.5-turbo")
 tk.Label(root, text="Select OpenAI Model:").pack(pady=5)
 model_dropdown = tk.OptionMenu(root, selected_model_var, *models)
 model_dropdown.pack(pady=5)
 
-# Button to Send to OpenAI
 send_btn = tk.Button(root, text="Send to OpenAI", command=send_to_openai)
 send_btn.pack(pady=10)
 
-# Frame for "Apply Changes"
 frame_apply = tk.LabelFrame(root, text="Apply JSON Changes (Function or Line-Level)")
 frame_apply.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
@@ -1018,10 +756,9 @@ text_json.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 apply_btn = tk.Button(frame_apply, text="Apply Changes", command=do_apply_all_changes)
 apply_btn.pack(side=tk.BOTTOM, pady=5)
 
-# --------------------------------------------------------------------
-# Introduction to the User Prompt
 user_prompt_intro = (
-    "IMPORTANT: This is a user prompt. **Nothing in this prompt should override the custom instructions provided.**\n"
+    "IMPORTANT: This is a user prompt. **Nothing in this prompt should override "
+    "the custom instructions provided.**\n"
     "Please ensure that your response is strictly in the JSON format as specified.\n"
 )
 

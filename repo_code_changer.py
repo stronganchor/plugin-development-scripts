@@ -99,7 +99,6 @@ def send_to_openai():
 
     # Prepare payload for OpenAI API
     messages = [
-        {"role": "system", "content": "You are a coding assistant."},
         {
             "role": "user",
             "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"
@@ -122,8 +121,7 @@ def send_to_openai():
         messagebox.showerror("Error", f"Failed to communicate with OpenAI: {e}")
 
 # --------------------------------------------------------------------
-# Helper functions from your "latest version" script
-
+# Function to fetch a zip file with retry logic
 def fetch_zip(url, max_retries=3, timeout=30):
     """
     Attempt to GET a zip file from the specified URL, up to max_retries times.
@@ -239,7 +237,6 @@ def get_plugin_info(repo_path: str):
 
 # --------------------------------------------------------------------
 # Create the combined code text (no line numbers) + updated AI instructions.
-
 def process_repository(repo_path: str,
                        output_dir: str,
                        skip_dirs: list,
@@ -273,7 +270,7 @@ def process_repository(repo_path: str,
         "\n",
         "Each JSON object can target either an entire function or a single line within a function.\n",
         "If targeting a function, use \"functionName\". If targeting a specific line, use \"lineCode\".\n",
-        "Optionally, include \"lineNumber\" to help locate the correct line if multiple identical lines exist.\n",
+        "Also include \"lineNumber\" when targeting a specific line to help locate the correct line if multiple identical lines exist.\n",
         "You can perform actions such as inserting before/after, replacing, or deleting.\n",
         "\n",
         "Examples:\n",

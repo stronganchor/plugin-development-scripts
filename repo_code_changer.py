@@ -29,6 +29,9 @@ openai.api_key = api_key
 client = OpenAI()
 
 # Function to get available models with priority models at the top
+"""
+Retrieves the list of available OpenAI models, prioritizing specified models.
+"""
 def get_available_models():
     priority_models = ["o1-mini", "o1-preview", "gpt-4o", "gpt-4o-mini"]  # Define your priority models
 
@@ -55,6 +58,10 @@ def get_available_models():
         # Return priority models as fallback
         return priority_models
         
+# Retrieves and prioritizes available OpenAI models for selection.
+"""
+Sends the combined repository code and user prompt to OpenAI and handles the response.
+"""
 def send_to_openai():
     raw_path = combine_path_var.get().strip()
     if not raw_path:
@@ -120,8 +127,13 @@ def send_to_openai():
     except Exception as e:
         messagebox.showerror("Error", f"Failed to communicate with OpenAI: {e}")
 
+# Sends the combined code and user prompt to OpenAI and handles the response.
 # --------------------------------------------------------------------
 # Function to fetch a zip file with retry logic
+"""
+Attempts to download a ZIP file from the given URL with retries.
+Returns the raw bytes if successful, otherwise None.
+"""
 def fetch_zip(url, max_retries=3, timeout=30):
     """
     Attempt to GET a zip file from the specified URL, up to max_retries times.
@@ -151,6 +163,12 @@ def fetch_zip(url, max_retries=3, timeout=30):
 
     return None  # All attempts failed
 
+# Downloads a ZIP file from the specified URL with retry logic.
+"""
+Downloads a GitHub repository as a ZIP file from the specified URL and extracts it.
+Tries 'main' and 'master' branches by default.
+Returns the path to the extracted repository.
+"""
 def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> str:
     """
     Downloads the GitHub repo zip (from 'main' or 'master') into extraction_dir and returns the path.
@@ -193,6 +211,10 @@ def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> s
     print(f"[DEBUG] Repository extracted to: {repo_path}")
     return repo_path
 
+"""
+Extracts plugin information such as name and version from top-level PHP files in the repository.
+Returns a tuple of (plugin_name, plugin_version).
+"""
 def get_plugin_info(repo_path: str):
     """
     Scans top-level .php files in the repo for Plugin Name and Version lines.
@@ -237,6 +259,11 @@ def get_plugin_info(repo_path: str):
 
 # --------------------------------------------------------------------
 # Create the combined code text (no line numbers) + updated AI instructions.
+"""
+Processes the repository by combining code from various files into a single text file.
+Excludes specified directories and adds custom AI instructions.
+Returns the combined code as a string.
+"""
 def process_repository(repo_path: str,
                        output_dir: str,
                        skip_dirs: list,
@@ -386,6 +413,11 @@ def process_repository(repo_path: str,
 
     return final_output  # Return the text for sending to OpenAI
 
+# Combines all relevant code files into a single text file for processing.
+"""
+Applies function-level or line-level changes to a file based on the specified action.
+Supports Python, PHP, and JavaScript file types.
+"""
 def apply_function_level_change(lines, func_name, action, code, file_extension):
     """
     Dispatches to the appropriate function-level or line-level change handler based on the file type.
@@ -416,6 +448,10 @@ def apply_function_level_change(lines, func_name, action, code, file_extension):
         # Line-level changes
         return apply_line_level_change(lines, action, code, line_code=code)
 
+# Applies function-level or line-level changes based on the provided parameters.
+"""
+Handles line-level changes such as inserting, deleting, or replacing specific lines in a file.
+"""
 def apply_line_level_change(lines, action, new_code, line_code=None, reference_line_number=None):
     """
     Handles line-level changes for any file type by searching for the line code.
@@ -466,6 +502,9 @@ def apply_line_level_change(lines, action, new_code, line_code=None, reference_l
 
     return lines
 
+"""
+Applies function-level changes to Python files by modifying function definitions based on the action.
+"""
 def apply_python_function_change(lines, func_name, action, code):
     """
     Handles function-level changes for Python files.
@@ -544,6 +583,9 @@ def apply_python_function_change(lines, func_name, action, code):
     return lines
 
 
+"""
+Applies function-level changes to PHP or JavaScript files by modifying functions enclosed in braces.
+"""
 def apply_brace_delimited_function_change(lines, func_name, action, code):
     """
     lines       : list of lines from the file
@@ -676,6 +718,9 @@ def apply_brace_delimited_function_change(lines, func_name, action, code):
     print(f"[WARNING] Unknown action '{action}' for {func_name} in PHP/JavaScript file. No changes applied.")
     return lines
 
+"""
+Parses JSON instructions and applies the specified function-level or line-level changes to the repository files.
+"""
 def apply_function_level_changes(repo_path, json_content):
     """
     Expect JSON array. Each object can target either a function or a specific line.
@@ -712,6 +757,8 @@ def apply_function_level_changes(repo_path, json_content):
         line_number = change.get("lineNumber", None)  # Optional
         action = change["action"].lower()
         code = change.get("code", None)
+        if code and not code.endswith('\n'):
+            code = code + '\n'
 
         # Validate
         target_file = os.path.join(repo_path, file_rel)
@@ -748,6 +795,10 @@ def apply_function_level_changes(repo_path, json_content):
 
 # --------------------------------------------------------------------
 # Utility for saving/loading last paths
+"""
+Loads the last used path from a file if it exists.
+Returns the path as a string or an empty string if the file doesn't exist.
+"""
 def load_last_path(filename):
     if os.path.exists(filename):
         try:
@@ -757,6 +808,9 @@ def load_last_path(filename):
             pass
     return ""
 
+"""
+Saves the provided path to a specified file for future sessions.
+"""
 def save_last_path(filename, path):
     try:
         with open(filename, 'w', encoding='utf-8') as f:
@@ -767,16 +821,29 @@ def save_last_path(filename, path):
 # --------------------------------------------------------------------
 # TKINTER UI
 
+"""
+Opens a dialog for the user to select a directory for combining code.
+Sets the selected path in the combine_path_var variable.
+"""
 def browse_folder_for_combine():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
         combine_path_var.set(folder_selected)
 
+"""
+Opens a dialog for the user to select a directory for applying changes.
+Sets the selected path in the apply_path_var variable.
+"""
 def browse_folder_for_apply():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
         apply_path_var.set(folder_selected)
 
+"""
+Handles the download and combination of repository code.
+Determines if the input is a URL or local path, downloads if necessary, and combines the code.
+Copies the combined code to the clipboard.
+"""
 def do_download_and_combine():
     """
     Called when user clicks 'Download & Combine':
@@ -844,6 +911,10 @@ def do_download_and_combine():
     messagebox.showinfo("Success", "Code combined and copied to clipboard!\n"
                                    "Paste into ChatGPT for review.")
 
+"""
+Applies JSON-based changes to the repository code.
+Parses the JSON input and modifies the code accordingly.
+"""
 def do_apply_changes():
     """
     Called when user clicks 'Apply Changes'.

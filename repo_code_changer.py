@@ -121,6 +121,24 @@ def send_to_openai():
             model=selected_model,
         )
         response_content = response.choices[0].message.content
+
+        # Extract JSON array from the response_content
+       start = response_content.find('[')
+       end = response_content.rfind(']')
+    
+       if start != -1 and end != -1 and start < end:
+           json_only = response_content[start:end+1]
+           try:
+               # Validate JSON
+               json_object = json.loads(json_only)
+               # If valid, format it with indentation for readability
+               formatted_json = json.dumps(json_object, indent=2)
+               response_content = formatted_json
+           except json.JSONDecodeError as e:
+               messagebox.showerror("JSON Error", f"Failed to parse JSON from response:\n{e}")
+       else:
+           messagebox.showerror("Format Error", "The response does not contain a valid JSON array.")
+        
         text_json.delete("1.0", tk.END)
         text_json.insert(tk.END, response_content)
         messagebox.showinfo("Success", "Response received from OpenAI!")
@@ -721,7 +739,7 @@ def apply_brace_delimited_function_change(lines, func_name, action, code):
 """
 Parses JSON instructions and applies the specified function-level or line-level changes to the repository files.
 """
-def apply_function_level_changes(repo_path, json_content):
+def apply_all_changes(repo_path, json_content):
     """
     Expect JSON array. Each object can target either a function or a specific line.
       {
@@ -915,7 +933,7 @@ def do_download_and_combine():
 Applies JSON-based changes to the repository code.
 Parses the JSON input and modifies the code accordingly.
 """
-def do_apply_changes():
+def do_apply_all_changes():
     """
     Called when user clicks 'Apply Changes'.
     1. Get the folder path for applying changes.
@@ -938,7 +956,7 @@ def do_apply_changes():
         messagebox.showwarning("No JSON", "Please paste JSON instructions for changes.")
         return
 
-    apply_function_level_changes(repo_path, json_input)
+    apply_all_changes(repo_path, json_input)
     messagebox.showinfo("Done", "Code changes have been applied.")
 
 # --------------------------------------------------------------------
@@ -997,7 +1015,7 @@ tk.Label(frame_apply, text="Paste JSON changes here:").pack(anchor=tk.W, padx=5)
 text_json = tk.Text(frame_apply, wrap=tk.NONE, width=80, height=10)
 text_json.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-apply_btn = tk.Button(frame_apply, text="Apply Changes", command=do_apply_changes)
+apply_btn = tk.Button(frame_apply, text="Apply Changes", command=do_apply_all_changes)
 apply_btn.pack(side=tk.BOTTOM, pady=5)
 
 # --------------------------------------------------------------------

@@ -27,6 +27,15 @@ if not api_key:
 openai.api_key = api_key
 
 # Function to send data to OpenAI
+def get_available_models():
+    try:
+        response = openai.Model.list()
+        models = [model['id'] for model in response['data']]
+        return models
+    except Exception as e:
+        print(f"[ERROR] Could not fetch models: {e}")
+        return ["gpt-chatgpt-4o-latest"]  # Fallback model
+        
 def send_to_openai():
     raw_path = combine_path_var.get().strip()
     if not raw_path:
@@ -78,13 +87,14 @@ def send_to_openai():
     # Call OpenAI API
     try:
         client = OpenAI()
+        selected_model = selected_model_var.get()
 
         response = client.chat.completions.create(
             messages=[{
                 "role": "user",
                 "content": f"{combined_code}\n\n{user_prompt}",
             }],
-            model="o1-preview",
+            model=selected_model,
         )
         response_content = response.choices[0].message.content
         text_json.delete("1.0", tk.END)
@@ -740,6 +750,13 @@ frame_prompt.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
 user_prompt_var = tk.Text(frame_prompt, wrap=tk.WORD, height=5)
 user_prompt_var.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+# Add OpenAI model selection dropdown
+models = get_available_models()
+selected_model_var = tk.StringVar(value=models[0] if models else "gpt-3.5-turbo")
+tk.Label(root, text="Select OpenAI Model:").pack(pady=5)
+model_dropdown = tk.OptionMenu(root, selected_model_var, *models)
+model_dropdown.pack(pady=5)
 
 # Button to Send to OpenAI
 send_btn = tk.Button(root, text="Send to OpenAI", command=send_to_openai)

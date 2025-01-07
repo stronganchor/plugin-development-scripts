@@ -623,13 +623,6 @@ frame_prompt.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 user_prompt_var = tk.Text(frame_prompt, wrap=tk.WORD, height=5)
 user_prompt_var.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-# Frame for "JSON Response"
-frame_response = tk.LabelFrame(root, text="JSON Response from OpenAI")
-frame_response.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-text_json = tk.Text(frame_response, wrap=tk.NONE, height=10)
-text_json.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
 # Button to Send to OpenAI
 send_btn = tk.Button(root, text="Send to OpenAI", command=send_to_openai)
 send_btn.pack(pady=10)

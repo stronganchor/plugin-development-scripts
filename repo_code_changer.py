@@ -155,23 +155,27 @@ def send_to_api():
             response_data = response.json()
             response_content = response_data['choices'][0]['message']['content']
 
-        else:  # "anthropic"
+        elif provider == "anthropic":
             anthro_client = anthropic.Anthropic()
-            
-            # Anthropics uses a separate `system` field instead of a system role in `messages`
-            system_message = SYSTEM_MESSAGE_FOR_JSON["content"]  # Extract the content only
-            user_message = {
-                "role": "user",
-                "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"
-            }
-
-            response = anthro_client.messages.create(
-                model=selected_model,
-                max_tokens=8000,
-                system=system_message,  # Anthropics requires system message separately
-                messages=[user_message]  # No system message in the list
-            )
-            response_content = response.content
+        
+            system_message = SYSTEM_MESSAGE_FOR_JSON["content"]  # Extract system instructions
+            user_content = f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"  # Convert user input to a single string
+        
+            try:
+                response = anthro_client.messages.create(
+                    model=selected_model,
+                    max_tokens=8000,
+                    system=system_message,  # Anthropic allows a system message
+                    messages=[{"role": "user", "content": user_content}]  
+                )
+                response_content = response.content
+        
+            except anthropic.APIError as e:
+                messagebox.showerror("Anthropic API Error", f"Error: {e.status_code} - {e.message}")
+                return
+            except Exception as e:
+                messagebox.showerror("Error", f"Unexpected error: {e}")
+                return
 
         # Parse JSON output
         try:

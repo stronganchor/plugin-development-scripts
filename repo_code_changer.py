@@ -127,7 +127,6 @@ def send_to_api():
         if provider == "openai":
             client = OpenAI(api_key=openai_api_key)
             messages = [
-                SYSTEM_MESSAGE_FOR_JSON,  # OpenAI supports system messages here
                 {"role": "user", "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"}
             ]
             response = client.chat.completions.create(
@@ -190,7 +189,7 @@ def send_to_api():
         messagebox.showinfo("Success", f"Response received from {provider.capitalize()}!")
 
     except Exception as e:
-        messagebox.showerror("Error", f"API request failed: {e}")
+        messagebox.showerror("Error", f"API request failed: {e}. response_content: {response_content}")
 
 # ------------------------------------------------------------------------
 # The following functions for downloading repos, processing code,

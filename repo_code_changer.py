@@ -824,8 +824,7 @@ def update_models(*args):
     elif provider == "deepseek":
         models = ["r1"]
     else:  # "anthropic"
-        # For demonstration, we specify only the Claude 3.5 Sonnet model
-        models = ["claude-3-5-sonnet-20241022"]
+        models = ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20241022"]
     
     for m in models:
         model_menu.add_command(label=m, command=tk._setit(selected_model_var, m))

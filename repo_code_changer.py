@@ -165,7 +165,7 @@ def send_to_api():
                     system=system_message,  # Anthropic allows a system message
                     messages=[{"role": "user", "content": user_content}]  
                 )
-                response_content = response.content
+                response_content = response.content[0].text
         
             except anthropic.APIError as e:
                 messagebox.showerror("Anthropic API Error", f"Error: {e.status_code} - {e.message}")

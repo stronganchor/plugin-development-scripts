@@ -132,7 +132,6 @@ def send_to_api():
             response = client.chat.completions.create(
                 messages=messages,
                 model=selected_model,
-                max_tokens=1024,
                 response_format={"type": "json_object"},
             )
             response_content = response.choices[0].message.content

@@ -8,12 +8,16 @@ from tkinter import filedialog, messagebox
 import openai
 import re
 
+# NEW: Import Anthropic
+import anthropic
+
 from openai import OpenAI
 
 # ------------------------- New Constants & Environment -------------------------
 DEEPSEEK_API_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
 openai_api_key = os.getenv("OPENAI_API_KEY")
 deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 # ------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------
@@ -43,7 +47,7 @@ user_prompt_intro = (
     "Please ensure that your response is strictly in the JSON format as specified.\n"
 )
 
-def get_available_models():
+def get_available_models_openai():
     """
     Retrieves the list of available OpenAI models, prioritizing specified models.
     Returns priority models first, then other models. Falls back if it cannot fetch.
@@ -54,9 +58,8 @@ def get_available_models():
         response = client.models.list()
         fetched_models = [model.id for model in response]
 
-        available_priority_models = [model for model in priority_models if model in fetched_models]
-        other_models = [model for model in fetched_models if model not in priority_models]
-
+        available_priority_models = [m for m in priority_models if m in fetched_models]
+        other_models = [m for m in fetched_models if m not in priority_models]
         return available_priority_models + other_models
     except Exception as e:
         print(f"[ERROR] Could not fetch OpenAI models: {e}")
@@ -65,7 +68,7 @@ def get_available_models():
 def send_to_api():
     """
     Replaces the old 'send_to_openai' function.
-    This one checks which provider is selected (OpenAI or Deepseek)
+    This one checks which provider is selected (OpenAI, Deepseek, or Anthropic)
     and sends the request accordingly.
     """
     provider = api_provider_var.get()
@@ -76,6 +79,9 @@ def send_to_api():
         return
     if provider == "deepseek" and not deepseek_api_key:
         messagebox.showerror("Error", "DEEPSEEK_API_KEY environment variable is not set.")
+        return
+    if provider == "anthropic" and not anthropic_api_key:
+        messagebox.showerror("Error", "ANTHROPIC_API_KEY environment variable is not set.")
         return
 
     raw_path = combine_path_var.get().strip()
@@ -131,6 +137,7 @@ def send_to_api():
     # Make the API call
     try:
         selected_model = selected_model_var.get()
+        
         if provider == "openai":
             client = OpenAI(api_key=openai_api_key)
             response = client.chat.completions.create(
@@ -140,7 +147,7 @@ def send_to_api():
             )
             response_content = response.choices[0].message.content
 
-        else:  # Deepseek
+        elif provider == "deepseek":
             headers = {
                 "Authorization": f"Bearer {deepseek_api_key}",
                 "Content-Type": "application/json"
@@ -155,6 +162,22 @@ def send_to_api():
             response.raise_for_status()
             response_data = response.json()
             response_content = response_data['choices'][0]['message']['content']
+
+        else:  # "anthropic"
+            # Anthropic client automatically reads ANTHROPIC_API_KEY if not specified
+            anthro_client = anthropic.Anthropic()
+            # NOTE: Anthropics typically handle messages differently, but this
+            #       snippet attempts to pass them in a similar structure.
+            #       We'll rely on the 'messages' list as standard role-based content.
+            # Convert the existing format to what Anthropic expects:
+            # e.g. a list of { "role": "user" | "assistant", "content": "..."} 
+            # We'll reuse the same structure directly.
+            response = anthro_client.messages.create(
+                model=selected_model,  
+                max_tokens_to_sample=1024,  
+                messages=messages  # using the same role-based approach
+            )
+            response_content = response.get("content", "")
 
         # Attempt to parse as JSON
         try:
@@ -172,8 +195,8 @@ def send_to_api():
 
 # ------------------------------------------------------------------------
 # The following functions for downloading repos, processing code,
-# applying JSON changes, and the UI remain largely the same as in
-# the original script, except for updated references where needed.
+# applying JSON changes, and the UI remain the same except for new lines
+# for 'anthropic' in the model selection.
 # ------------------------------------------------------------------------
 
 def download_github_repo(repo_url: str, extraction_dir: str, max_retries=3) -> str:
@@ -779,13 +802,14 @@ frame_prompt.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 user_prompt_var = tk.Text(frame_prompt, wrap=tk.WORD, height=5)
 user_prompt_var.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-# -------- Provider Selection (OpenAI vs. Deepseek) --------
+# -------- Provider Selection (OpenAI vs. Deepseek vs. Anthropic) --------
 api_provider_var = tk.StringVar(value="openai")
 frame_provider = tk.Frame(root)
 frame_provider.pack(pady=5)
 
 tk.Radiobutton(frame_provider, text="OpenAI",   variable=api_provider_var, value="openai").pack(side=tk.LEFT)
 tk.Radiobutton(frame_provider, text="Deepseek", variable=api_provider_var, value="deepseek").pack(side=tk.LEFT)
+tk.Radiobutton(frame_provider, text="Anthropic", variable=api_provider_var, value="anthropic").pack(side=tk.LEFT)
 
 # -------- Model selection dropdown (updates depending on provider) --------
 def update_models(*args):
@@ -794,12 +818,14 @@ def update_models(*args):
     model_menu.delete(0, 'end')
     
     if provider == "openai":
-        models = get_available_models()
+        models = get_available_models_openai()
         if not models:
             models = ["gpt-3.5-turbo"]  # Fallback
-    else:
-        # For Deepseek, we’ll just hard-code to the R1 model
+    elif provider == "deepseek":
         models = ["r1"]
+    else:  # "anthropic"
+        # For demonstration, we specify only the Claude 3.5 Sonnet model
+        models = ["claude-3-5-sonnet-20241022"]
     
     for m in models:
         model_menu.add_command(label=m, command=tk._setit(selected_model_var, m))
@@ -812,9 +838,9 @@ model_dropdown.pack(pady=5)
 
 # Whenever the radio-button changes, refresh the model list
 api_provider_var.trace("w", update_models)
-update_models()  # Populate it the first time
+update_models()  # Populate once
 
-# -------- Button to Send to API (OpenAI or Deepseek) --------
+# -------- Button to Send to API --------
 send_btn = tk.Button(root, text="Send to API", command=send_to_api)
 send_btn.pack(pady=10)
 

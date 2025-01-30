@@ -174,7 +174,7 @@ def send_to_api():
             # We'll reuse the same structure directly.
             response = anthro_client.messages.create(
                 model=selected_model,  
-                max_tokens_to_sample=1024,  
+                max_tokens=8000,  
                 messages=messages  # using the same role-based approach
             )
             response_content = response.get("content", "")

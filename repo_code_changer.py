@@ -67,9 +67,7 @@ def get_available_models_openai():
 
 def send_to_api():
     """
-    Replaces the old 'send_to_openai' function.
-    This one checks which provider is selected (OpenAI, Deepseek, or Anthropic)
-    and sends the request accordingly.
+    Sends the user prompt and repository code to the selected AI provider (OpenAI, Deepseek, or Anthropic).
     """
     provider = api_provider_var.get()
     
@@ -89,9 +87,8 @@ def send_to_api():
         messagebox.showerror("Error", "No repository URL or path provided.")
         return
 
-    # Check if the input is a URL or a folder and process it
+    # Check if input is a URL or a folder and process it
     if raw_path.startswith("http://") or raw_path.startswith("https://"):
-        # Download and extract the repository
         try:
             output_dir = os.path.join(os.getcwd(), "combined_output")
             extracted_dir = os.path.join(output_dir, "extracted")
@@ -100,7 +97,6 @@ def send_to_api():
             messagebox.showerror("Error", f"Failed to download repository: {e}")
             return
     elif os.path.isdir(raw_path):
-        # Use the directory directly if it exists
         repo_path = raw_path
     else:
         messagebox.showerror("Error", f"Invalid path or URL: {raw_path}")
@@ -125,33 +121,29 @@ def send_to_api():
         messagebox.showwarning("Warning", "No prompt provided.")
         return
 
-    # Prepare messages for the API - system message + user message
-    messages = [
-        SYSTEM_MESSAGE_FOR_JSON,
-        {
-            "role": "user",
-            "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"
-        }
-    ]
+    selected_model = selected_model_var.get()
 
-    # Make the API call
     try:
-        selected_model = selected_model_var.get()
-        
         if provider == "openai":
             client = OpenAI(api_key=openai_api_key)
+            messages = [
+                SYSTEM_MESSAGE_FOR_JSON,  # OpenAI supports system messages here
+                {"role": "user", "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"}
+            ]
             response = client.chat.completions.create(
                 messages=messages,
                 model=selected_model,
+                max_tokens=1024,
                 response_format={"type": "json_object"},
             )
             response_content = response.choices[0].message.content
 
         elif provider == "deepseek":
-            headers = {
-                "Authorization": f"Bearer {deepseek_api_key}",
-                "Content-Type": "application/json"
-            }
+            messages = [
+                SYSTEM_MESSAGE_FOR_JSON,
+                {"role": "user", "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"}
+            ]
+            headers = {"Authorization": f"Bearer {deepseek_api_key}", "Content-Type": "application/json"}
             data = {
                 "messages": messages,
                 "model": selected_model,
@@ -164,22 +156,24 @@ def send_to_api():
             response_content = response_data['choices'][0]['message']['content']
 
         else:  # "anthropic"
-            # Anthropic client automatically reads ANTHROPIC_API_KEY if not specified
             anthro_client = anthropic.Anthropic()
-            # NOTE: Anthropics typically handle messages differently, but this
-            #       snippet attempts to pass them in a similar structure.
-            #       We'll rely on the 'messages' list as standard role-based content.
-            # Convert the existing format to what Anthropic expects:
-            # e.g. a list of { "role": "user" | "assistant", "content": "..."} 
-            # We'll reuse the same structure directly.
-            response = anthro_client.messages.create(
-                model=selected_model,  
-                max_tokens=8000,  
-                messages=messages  # using the same role-based approach
-            )
-            response_content = response.get("content", "")
+            
+            # Anthropics uses a separate `system` field instead of a system role in `messages`
+            system_message = SYSTEM_MESSAGE_FOR_JSON["content"]  # Extract the content only
+            user_message = {
+                "role": "user",
+                "content": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"
+            }
 
-        # Attempt to parse as JSON
+            response = anthro_client.messages.create(
+                model=selected_model,
+                max_tokens=8000,
+                system=system_message,  # Anthropics requires system message separately
+                messages=[user_message]  # No system message in the list
+            )
+            response_content = response.content
+
+        # Parse JSON output
         try:
             json_object = json.loads(response_content)
             formatted_json = json.dumps(json_object, indent=2)
@@ -190,6 +184,7 @@ def send_to_api():
         text_json.delete("1.0", tk.END)
         text_json.insert(tk.END, response_content)
         messagebox.showinfo("Success", f"Response received from {provider.capitalize()}!")
+
     except Exception as e:
         messagebox.showerror("Error", f"API request failed: {e}")
 

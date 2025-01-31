@@ -56,5 +56,6 @@ NOTES:
 - Only target a specific line if it is a unique line in the code that will not get confused with another line.
 - Actions: "insert before", "insert after", "delete", or "replace".
 - Keep changes minimal and do not modify unrelated code.
+- Make sure to escape any brackets or quotation marks in the code to ensure the JSON is valid.
 
 END OF INSTRUCTIONS.

@@ -1,61 +1,36 @@
 IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:
 You must respond **only** with a JSON array as specified below. **Do not include any other text or explanations**.
 When you propose code changes, output them as an array of JSON objects.
+
 Each object should have:
-  "file"         : The relative path of the file.
-  "functionName" : (Optional) The name of the function to affect.
-  "lineCode"     : (Optional) The exact code of the line to affect.
-  "action"       : One of ["insert before", "insert after", "delete", "replace"].
-  "code"         : (If inserting or replacing) Include the code to insert or replace.
+- **"file"** : The relative path of the file
+- **"functionName"** : The name of the function to affect
+- **"action"** : One of `["insert before", "insert after", "delete", "replace"]`
+- **"code"** : (If inserting or replacing) The code to insert or replace
 
-Each JSON object can target either an entire function or a single line within a function.
-If targeting a function, use "functionName". If targeting a specific line, use "lineCode".
-Also include "lineNumber" when targeting a specific line to help locate the correct line if multiple identical lines exist.
-You can perform actions such as inserting before/after, replacing, or deleting.
-
-Examples:
-Function-level change:
+**Examples** (function-level changes only):
 [
   {
     "file": "assets/js/quiz.js",
     "functionName": "resetQuizState",
     "action": "replace",
-    "code": "function resetQuizState() {\\n    // entire new code here\\n}"
+    "code": "function resetQuizState() {\n    // entire new code here\n}"
   },
   {
     "file": "assets/js/quiz.js",
     "functionName": "randomHelper",
     "action": "delete"
-  }
-]
-
-Line-level change:
-[
-  {
-    "file": "assets/js/quiz.js",
-    "lineCode": "var score = 0;",
-    "action": "replace",
-    "code": "var score = 10;"
   },
   {
     "file": "assets/js/quiz.js",
-    "lineCode": "console.log('Quiz started');",
-    "action": "delete"
-  },
-  {
-    "file": "assets/js/quiz.js",
-    "lineCode": "var i = 0;",
+    "functionName": "initQuiz",
     "action": "insert before",
-    "code": "console.log('Initializing counter');"
+    "code": "function logQuizInit() {\n    console.log('Quiz is about to initialize');\n}\n\n"
   }
 ]
 
-NOTES:
-- To target a function, specify "functionName" and do not provide "lineCode".
-- To target a specific line, specify "lineCode" and do not provide "functionName".
-- Only target a specific line if it is a unique line in the code that will not get confused with another line.
-- Actions: "insert before", "insert after", "delete", or "replace".
+**NOTES**:
+- Use **"insert before"** or **"insert after"** only to place a new function or other code either before the function definition or after the end of the function.
 - Keep changes minimal and do not modify unrelated code.
-- Make sure to escape any brackets or quotation marks in the code to ensure the JSON is valid.
-
-END OF INSTRUCTIONS.
+- Escape any brackets or quotation marks in the code provided so the JSON remains valid.
+- Include appropriate spacing or indentation within your inserted or replaced function code.

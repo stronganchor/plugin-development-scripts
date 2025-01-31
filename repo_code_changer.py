@@ -297,6 +297,10 @@ def get_plugin_info(repo_path: str):
 
     return plugin_name, plugin_version
 
+def load_custom_instructions(path="custom_instructions.txt"):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
 def process_repository(repo_path: str,
                        output_dir: str,
                        skip_dirs: list,
@@ -313,70 +317,7 @@ def process_repository(repo_path: str,
     total_chars = 0
 
     # Additional AI instructions appended at the end of the combined text
-    ai_instructions = [
-        "IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:\n",
-        "You must respond **only** with a JSON array as specified below. **Do not include any other text or explanations**.\n",
-        "When you propose code changes, output them as an array of JSON objects.\n",
-        "Each object should have:\n",
-        "  \"file\"         : The relative path of the file.\n",
-        "  \"functionName\" : (Optional) The name of the function to affect.\n",
-        "  \"lineCode\"     : (Optional) The exact code of the line to affect.\n",
-        "  \"lineNumber\"   : (Optional) The line number near which the lineCode exists (used to disambiguate if multiple matches).\n",
-        "  \"action\"       : One of [\"insert before\", \"insert after\", \"delete\", \"replace\"].\n",
-        "  \"code\"         : (If inserting or replacing) Include the code to insert or replace.\n",
-        "\n",
-        "Each JSON object can target either an entire function or a single line within a function.\n",
-        "If targeting a function, use \"functionName\". If targeting a specific line, use \"lineCode\".\n",
-        "Also include \"lineNumber\" when targeting a specific line to help locate the correct line if multiple identical lines exist.\n",
-        "You can perform actions such as inserting before/after, replacing, or deleting.\n",
-        "\n",
-        "Examples:\n",
-        "Function-level change:\n",
-        "[\n",
-        "  {\n",
-        "    \"file\": \"assets/js/quiz.js\",\n",
-        "    \"functionName\": \"resetQuizState\",\n",
-        "    \"action\": \"replace\",\n",
-        "    \"code\": \"function resetQuizState() {\\n    // entire new code here\\n}\"\n",
-        "  },\n",
-        "  {\n",
-        "    \"file\": \"assets/js/quiz.js\",\n",
-        "    \"functionName\": \"randomHelper\",\n",
-        "    \"action\": \"delete\"\n",
-        "  }\n",
-        "]\n",
-        "\n",
-        "Line-level change:\n",
-        "[\n",
-        "  {\n",
-        "    \"file\": \"assets/js/quiz.js\",\n",
-        "    \"lineCode\": \"var score = 0;\",\n",
-        "    \"action\": \"replace\",\n",
-        "    \"code\": \"var score = 10;\"\n",
-        "  },\n",
-        "  {\n",
-        "    \"file\": \"assets/js/quiz.js\",\n",
-        "    \"lineCode\": \"console.log('Quiz started');\",\n",
-        "    \"action\": \"delete\"\n",
-        "  },\n",
-        "  {\n",
-        "    \"file\": \"assets/js/quiz.js\",\n",
-        "    \"lineCode\": \"var i = 0;\",\n",
-        "    \"lineNumber\": 150,\n",
-        "    \"action\": \"insert before\",\n",
-        "    \"code\": \"console.log('Initializing counter');\"\n",
-        "  }\n",
-        "]\n",
-        "\n",
-        "NOTES:\n",
-        "- To target a function, specify \"functionName\".\n",
-        "- To target a specific line, specify \"lineCode\".\n",
-        "- Optionally, include \"lineNumber\".\n",
-        "- Actions: \"insert before\", \"insert after\", \"delete\", or \"replace\".\n",
-        "- Keep changes minimal and do not modify unrelated code.\n",
-        "\n",
-        "END OF INSTRUCTIONS.\n\n"
-    ]
+    ai_instructions = load_custom_instructions()
 
     for root_dir, dirs, files in os.walk(repo_path, topdown=True):
         # Exclude directories in skip_dirs

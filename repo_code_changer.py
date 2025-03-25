@@ -20,6 +20,12 @@ deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 # ------------------------------------------------------------------------------
 
+# ------------------------- Ollama Endpoints -------------------------
+# These endpoints correspond to your local LLM docker containers.
+OLLAMA_GEMMA3_ENDPOINT = "http://gemma3-27b:8000"  # Adjust port if necessary
+OLLAMA_QWQ_ENDPOINT = "http://qwq-coding:8000"       # Adjust port if necessary
+# ------------------------------------------------------------------------------
+
 # --------------------------------------------------------------------
 # Files that store last-used paths (so we can restore defaults)
 LAST_COMBINE_PATH_FILE = 'last_combine_path.txt'
@@ -67,7 +73,7 @@ def get_available_models_openai():
 
 def send_to_api():
     """
-    Sends the user prompt and repository code to the selected AI provider (OpenAI, Deepseek, or Anthropic).
+    Sends the user prompt and repository code to the selected AI provider (OpenAI, Deepseek, Anthropic, or Ollama).
     """
     provider = api_provider_var.get()
     
@@ -172,6 +178,28 @@ def send_to_api():
                 return
             except Exception as e:
                 messagebox.showerror("Error", f"Unexpected error: {e}")
+                return
+
+        elif provider == "ollama":
+            # Use local LLMs installed in docker containers via Ollama
+            local_llm_endpoints = {
+                "gemma3:27b": OLLAMA_GEMMA3_ENDPOINT,
+                "qwq": OLLAMA_QWQ_ENDPOINT
+            }
+            endpoint = local_llm_endpoints.get(selected_model)
+            if not endpoint:
+                messagebox.showerror("Error", f"No endpoint configured for model: {selected_model}")
+                return
+            payload = {
+                "prompt": f"{combined_code}\n\n{user_prompt_intro}\n\n{user_prompt}"
+            }
+            try:
+                r = requests.post(endpoint + "/completions", json=payload, timeout=60)
+                r.raise_for_status()
+                response_data = r.json()
+                response_content = response_data.get("response", "")
+            except Exception as e:
+                messagebox.showerror("Error", f"Local LLM request failed: {e}")
                 return
 
         # Parse JSON output
@@ -763,7 +791,7 @@ frame_prompt.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 user_prompt_var = tk.Text(frame_prompt, wrap=tk.WORD, height=5)
 user_prompt_var.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-# -------- Provider Selection (OpenAI vs. Deepseek vs. Anthropic) --------
+# -------- Provider Selection (OpenAI vs. Deepseek vs. Anthropic vs. Ollama) --------
 api_provider_var = tk.StringVar(value="openai")
 frame_provider = tk.Frame(root)
 frame_provider.pack(pady=5)
@@ -771,6 +799,7 @@ frame_provider.pack(pady=5)
 tk.Radiobutton(frame_provider, text="OpenAI",   variable=api_provider_var, value="openai").pack(side=tk.LEFT)
 tk.Radiobutton(frame_provider, text="Deepseek", variable=api_provider_var, value="deepseek").pack(side=tk.LEFT)
 tk.Radiobutton(frame_provider, text="Anthropic", variable=api_provider_var, value="anthropic").pack(side=tk.LEFT)
+tk.Radiobutton(frame_provider, text="Ollama", variable=api_provider_var, value="ollama").pack(side=tk.LEFT)
 
 # -------- Model selection dropdown (updates depending on provider) --------
 def update_models(*args):
@@ -784,13 +813,20 @@ def update_models(*args):
             models = ["gpt-3.5-turbo"]  # Fallback
     elif provider == "deepseek":
         models = ["r1"]
-    else:  # "anthropic"
+    elif provider == "anthropic":
         models = ["claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"]
+    elif provider == "ollama":
+        models = ["gemma3:27b", "qwq"]
+    else:
+        models = []
     
     for m in models:
         model_menu.add_command(label=m, command=tk._setit(selected_model_var, m))
     # Set the first model in the updated list
-    selected_model_var.set(models[0])
+    if models:
+        selected_model_var.set(models[0])
+    else:
+        selected_model_var.set("")
 
 selected_model_var = tk.StringVar()
 model_dropdown = tk.OptionMenu(root, selected_model_var, "")

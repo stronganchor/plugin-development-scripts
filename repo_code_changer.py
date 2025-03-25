@@ -26,7 +26,7 @@ LAST_COMBINE_PATH_FILE = 'last_combine_path.txt'
 LAST_APPLY_PATH_FILE   = 'last_apply_path.txt'
 
 # Directories to skip when creating combined code:
-SKIP_DIRS = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media"]
+SKIP_DIRS = ["getid3", "iso-languages", "plugin-update-checker", "languages", "media", "includes"]
 
 # ------------------------- NEW SYSTEM MESSAGE -------------------------
 # This will instruct the model to produce valid JSON only.
@@ -52,7 +52,7 @@ def get_available_models_openai():
     Retrieves the list of available OpenAI models, prioritizing specified models.
     Returns priority models first, then other models. Falls back if it cannot fetch.
     """
-    priority_models = ["o1-mini", "o1-preview", "gpt-4o", "gpt-4o-mini"]
+    priority_models = ["o3-mini-high", "o3-mini", "o1-mini", "o1-preview", "gpt-4o", "gpt-4o-mini"]
     try:
         client = OpenAI(api_key=openai_api_key)
         response = client.models.list()

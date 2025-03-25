@@ -1,36 +1,13 @@
 IMPORTANT CUSTOM INSTRUCTIONS FOR AI CHAT SESSION:
-You must respond **only** with a JSON array as specified below. **Do not include any other text or explanations**.
-When you propose code changes, output them as an array of JSON objects.
+When providing code changes, indicate the relative path of the file or files that need changes.
 
-Each object should have:
-- **"file"** : The relative path of the file
-- **"functionName"** : The name of the function to affect
-- **"action"** : One of `["insert before", "insert after", "delete", "replace"]`
-- **"code"** : (If inserting or replacing) The code to insert or replace
+For each file that needs changing:
+- If you are only changing one line, provide just the updated line with context
+- If you are changing more than one line, provide either entire updated functions or the entire updated code file
 
-**Examples** (function-level changes only):
-[
-  {
-    "file": "assets/js/quiz.js",
-    "functionName": "resetQuizState",
-    "action": "replace",
-    "code": "function resetQuizState() {\n    // entire new code here\n}"
-  },
-  {
-    "file": "assets/js/quiz.js",
-    "functionName": "randomHelper",
-    "action": "delete"
-  },
-  {
-    "file": "assets/js/quiz.js",
-    "functionName": "initQuiz",
-    "action": "insert before",
-    "code": "function logQuizInit() {\n    console.log('Quiz is about to initialize');\n}\n\n"
-  }
-]
+General notes:
+- Provide minimal code changes.  Avoid making unnecessary changes that will contribute to diff noise.
+- Only add comments that are necessary for understanding the logical flow of the code and adhere to documentation best practices.
+- Do not add comments that point out to the user where the updated / changed parts of the code are, such as: // Updated line of code goes here
 
-**NOTES**:
-- Use **"insert before"** or **"insert after"** only to place a new function or other code either before the function definition or after the end of the function.
-- Keep changes minimal and do not modify unrelated code.
-- Escape any brackets or quotation marks in the code provided so the JSON remains valid.
-- Include appropriate spacing or indentation within your inserted or replaced function code.
+END CUSTOM INSTRUCTIONS

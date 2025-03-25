@@ -4,7 +4,7 @@ import io
 import requests
 import zipfile
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import openai
 import re
 
@@ -623,6 +623,24 @@ def save_last_path(filename, path):
     except:
         pass
 
+def load_repo_list(filename):
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            print(f"[DEBUG] Failed to load repo list from {filename}: {e}")
+    return []
+
+def save_repo_list(filename, repo_list):
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(repo_list, f)
+    except Exception as e:
+        print(f"[DEBUG] Failed to save repo list to {filename}: {e}")
+
 def browse_folder_for_combine():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
@@ -646,7 +664,12 @@ def do_download_and_combine():
         messagebox.showerror("Error", "No URL/path provided for combining code.")
         return
 
-    save_last_path(LAST_COMBINE_PATH_FILE, raw_input)
+    repo_list = load_repo_list(LAST_COMBINE_PATH_FILE)
+    if raw_input in repo_list:
+        repo_list.remove(raw_input)
+    repo_list.insert(0, raw_input)
+    save_repo_list(LAST_COMBINE_PATH_FILE, repo_list)
+    combine_combobox['values'] = repo_list
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(script_dir, "combined_output")
@@ -722,11 +745,12 @@ root.title("Repo Code Changer")
 frame_combine = tk.LabelFrame(root, text="Download & Combine Code")
 frame_combine.pack(fill=tk.X, padx=10, pady=5)
 
-combine_path_var = tk.StringVar(value=load_last_path(LAST_COMBINE_PATH_FILE))
-
+repo_list = load_repo_list(LAST_COMBINE_PATH_FILE)
+combine_path_var = tk.StringVar(value=repo_list[0] if repo_list else "")
 tk.Label(frame_combine, text="Repo URL/Path:").pack(side=tk.LEFT, padx=5)
-combine_entry = tk.Entry(frame_combine, textvariable=combine_path_var, width=50)
-combine_entry.pack(side=tk.LEFT, padx=5)
+combine_combobox = ttk.Combobox(frame_combine, textvariable=combine_path_var, width=50)
+combine_combobox['values'] = repo_list
+combine_combobox.pack(side=tk.LEFT, padx=5)
 browse_btn1 = tk.Button(frame_combine, text="Browse...", command=browse_folder_for_combine)
 browse_btn1.pack(side=tk.LEFT, padx=5)
 combine_btn = tk.Button(frame_combine, text="Download & Combine", command=do_download_and_combine)

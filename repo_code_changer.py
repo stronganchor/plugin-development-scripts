@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import openai
 import re
+from repo_safety import contains_credentials, is_private_path, prompt_files, resolve_repo_file
 
 # NEW: Import Anthropic
 import anthropic
@@ -300,11 +301,13 @@ def get_plugin_info(repo_path: str):
     ]
 
     for fname in top_level_files:
-        if fname.lower().endswith(".php"):
-            full_path = os.path.join(repo_path, fname)
+        if fname.lower().endswith(".php") and not is_private_path(fname):
             try:
+                full_path = resolve_repo_file(repo_path, fname)
                 with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
                     contents = f.read()
+                if contains_credentials(contents):
+                    continue
                 for line in contents.splitlines():
                     if "Plugin Name:" in line:
                         name_part = line.split("Plugin Name:", 1)[1].strip()
@@ -337,7 +340,7 @@ def process_repository(repo_path: str,
                        plugin_name: str = None,
                        plugin_version: str = None):
     """
-    Walks the repo, reading all files (excluding skip_dirs), and merges them into
+    Reads repository text files, excluding ignored/private files, and merges them into
     one big string with instructions. Returns that combined string.
     """
     combined_contents = []
@@ -347,26 +350,20 @@ def process_repository(repo_path: str,
     # Additional AI instructions appended at the end of the combined text
     ai_instructions = load_custom_instructions()
 
-    for root_dir, dirs, files in os.walk(repo_path, topdown=True):
-        # Exclude directories in skip_dirs
-        dirs[:] = [d for d in dirs if d not in skip_dirs]
-
-        for filename in files:
-            filepath = os.path.join(root_dir, filename)
-            relative_path = os.path.relpath(filepath, repo_path)
-            header = f"--- {relative_path} ---\n"
-
-            try:
-                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-            except Exception as e:
-                print(f"[DEBUG] Could not read file '{relative_path}' - {e}")
-                content = "<Could not read file>"
-
-            file_text = header + content + "\n\n"
-            combined_contents.append(file_text)
-            included_files.append(relative_path)
-            total_chars += len(file_text)
+    for relative_path in prompt_files(repo_path, skip_dirs, output_dir):
+        filepath = resolve_repo_file(repo_path, relative_path)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+        except (OSError, UnicodeError):
+            continue
+        if '\x00' in content or contains_credentials(content):
+            print(f"[INFO] Excluded binary or credential-bearing file: {relative_path}")
+            continue
+        file_text = f"--- {relative_path} ---\n" + content + "\n\n"
+        combined_contents.append(file_text)
+        included_files.append(relative_path)
+        total_chars += len(file_text)
 
     included_files.sort()
     intro_lines = [
@@ -377,6 +374,7 @@ def process_repository(repo_path: str,
         intro_lines.append(f"- {sd}\n")
 
     intro_lines.append("\nBelow is the file/folder structure of all **included** files:\n\n")
+    intro_lines.append("Git-ignored files, repository metadata and credential files are also excluded.\n\n")
     for fpath in included_files:
         intro_lines.append(f"{fpath}\n")
     intro_lines.append("\n\n")
@@ -386,6 +384,7 @@ def process_repository(repo_path: str,
     base_name = plugin_name if plugin_name else "all_code"
     if plugin_version:
         base_name += f" v{plugin_version}"
+    base_name = re.sub(r'[\\/:*?"<>|]', '_', base_name).strip('. ') or 'all_code'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     output_filename = os.path.join(output_dir, f"{base_name}.txt")
@@ -583,11 +582,22 @@ def apply_all_changes(repo_path, json_content):
         changes = json.loads(json_content)
     except json.JSONDecodeError as e:
         messagebox.showerror("JSON Error", f"Failed to parse JSON:\n{e}")
-        return
+        return False
 
     if not isinstance(changes, list):
         messagebox.showerror("Invalid JSON", "JSON root must be an array of changes.")
-        return
+        return False
+
+    # Validate the entire batch before writing, including symlink/junction targets.
+    try:
+        for change in changes:
+            if isinstance(change, dict) and 'file' in change:
+                resolve_repo_file(repo_path, change['file'])
+    except ValueError as error:
+        messagebox.showerror("Unsafe patch path", str(error))
+        return False
+
+    failed = False
 
     for change in changes:
         if not isinstance(change, dict):
@@ -606,7 +616,7 @@ def apply_all_changes(repo_path, json_content):
         if code and not code.endswith('\n'):
             code = code + '\n'
 
-        target_file = os.path.join(repo_path, file_rel)
+        target_file = resolve_repo_file(repo_path, file_rel)
         file_extension = os.path.splitext(file_rel)[1]
 
         if not os.path.exists(target_file):
@@ -618,6 +628,7 @@ def apply_all_changes(repo_path, json_content):
                 lines = f.readlines()
         except Exception as e:
             print(f"[ERROR] Could not read file '{target_file}' - {e}")
+            failed = True
             continue
 
         if func_name:
@@ -629,11 +640,15 @@ def apply_all_changes(repo_path, json_content):
             continue
 
         try:
+            if resolve_repo_file(repo_path, file_rel) != target_file:
+                raise ValueError('Patch target changed while applying the batch.')
             with open(target_file, 'w', encoding='utf-8') as f:
                 f.writelines(updated_lines)
             print(f"[INFO] Changes applied to {file_rel}")
         except Exception as e:
             print(f"[ERROR] Could not write file '{target_file}' - {e}")
+            failed = True
+    return not failed
 
 def load_last_path(filename):
     if os.path.exists(filename):
@@ -725,15 +740,19 @@ def do_download_and_combine():
     chars_per_token = 4
     max_chars = max_tokens * chars_per_token
 
-    final_output = process_repository(
-        repo_path,
-        output_dir,
-        SKIP_DIRS,
-        max_chars,
-        chars_per_token,
-        plugin_name=plugin_name,
-        plugin_version=plugin_version
-    )
+    try:
+        final_output = process_repository(
+            repo_path,
+            output_dir,
+            SKIP_DIRS,
+            max_chars,
+            chars_per_token,
+            plugin_name=plugin_name,
+            plugin_version=plugin_version
+        )
+    except (OSError, ValueError, RuntimeError) as error:
+        messagebox.showerror("Combine Error", f"Code could not be combined:\n{error}")
+        return
 
     # Copy the combined code to clipboard
     root.clipboard_clear()
@@ -762,8 +781,8 @@ def do_apply_all_changes():
         messagebox.showwarning("No JSON", "Please paste JSON instructions for changes.")
         return
 
-    apply_all_changes(repo_path, json_input)
-    messagebox.showinfo("Done", "Code changes have been applied.")
+    if apply_all_changes(repo_path, json_input):
+        messagebox.showinfo("Done", "Code changes have been applied.")
 
 # -------------------------- GUI Setup --------------------------
 root = tk.Tk()

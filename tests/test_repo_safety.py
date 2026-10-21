@@ -87,6 +87,50 @@ class RepositorySafetyTests(unittest.TestCase):
                 self.assertEqual(self.outside.read_text(), 'outside line\n')
                 self.assertNotIn(path, prompt_files(str(self.repo), []))
 
+    def test_in_repo_symlink_cannot_export_private_files_or_patch_metadata(self):
+        metadata = self.repo / '.git'
+        metadata.mkdir()
+        config = metadata / 'config'
+        config.write_text('metadata marker')
+        private = self.repo / '.env'
+        private.write_text('PRIVATE_ALIAS_MARKER')
+        try:
+            (self.repo / 'metadata.txt').symlink_to(config)
+            (self.repo / 'private.txt').symlink_to(private)
+        except OSError as error:
+            self.skipTest('Host does not permit symlink creation: ' + str(error))
+        self.assertFalse(self.apply([self.patch('metadata.txt', 'metadata marker')]))
+        self.assertEqual(config.read_text(), 'metadata marker')
+        files = prompt_files(str(self.repo), [])
+        self.assertNotIn('metadata.txt', files)
+        self.assertNotIn('private.txt', files)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows junction regression')
+    def test_internal_junction_cannot_export_private_files_or_patch_metadata(self):
+        metadata = self.repo / '.git'
+        metadata.mkdir()
+        config = metadata / 'config'
+        config.write_text('metadata marker')
+        private = self.repo / 'secrets'
+        private.mkdir()
+        (private / 'notes.txt').write_text('PRIVATE_ALIAS_MARKER')
+        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        aliases = [(self.repo / 'metadata-alias', metadata), (self.repo / 'private-alias', private)]
+        try:
+            for alias, target in aliases:
+                command = ('New-Item -ItemType Junction -Path ' + quote(alias)
+                           + ' -Target ' + quote(target) + ' | Out-Null')
+                subprocess.run(['powershell.exe', '-NoProfile', '-Command', command], check=True, capture_output=True)
+            self.assertFalse(self.apply([self.patch('metadata-alias/config', 'metadata marker')]))
+            self.assertEqual(config.read_text(), 'metadata marker')
+            files = prompt_files(str(self.repo), [])
+            self.assertNotIn(os.path.join('metadata-alias', 'config'), files)
+            self.assertNotIn(os.path.join('private-alias', 'notes.txt'), files)
+        finally:
+            for alias, _ in aliases:
+                if alias.exists():
+                    os.rmdir(alias)
+
     @unittest.skipUnless(os.name == 'nt', 'Windows junction regression')
     def test_windows_junction_cannot_escape(self):
         junction = self.repo / 'junction'

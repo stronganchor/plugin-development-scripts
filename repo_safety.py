@@ -43,6 +43,9 @@ def resolve_repo_file(repo_path, relative_path):
         contained = False
     if not contained or os.path.normcase(target) == os.path.normcase(root):
         raise ValueError('File resolves outside the selected repository.')
+    resolved_parts = os.path.relpath(target, root).replace('\\', '/').split('/')
+    if any(part.casefold() in {'.git', '.hg', '.svn'} for part in resolved_parts):
+        raise ValueError('Patch paths must not resolve into repository metadata.')
     return target
 
 
@@ -76,6 +79,7 @@ def prompt_files(repo_path, skip_dirs, output_dir=None):
     for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
         dirs[:] = [name for name in dirs if name.casefold() not in skipped
                    and not os.path.islink(os.path.join(current, name))
+                   and not getattr(os.path, 'isjunction', lambda path: False)(os.path.join(current, name))
                    and os.path.realpath(os.path.join(current, name)) != excluded_output]
         for name in files:
             relative = os.path.relpath(os.path.join(current, name), root)
@@ -84,6 +88,8 @@ def prompt_files(repo_path, skip_dirs, output_dir=None):
             try:
                 target = resolve_repo_file(root, relative)
             except ValueError:
+                continue
+            if is_private_path(os.path.relpath(target, root)):
                 continue
             if os.path.isfile(target):
                 candidates.append(relative)
